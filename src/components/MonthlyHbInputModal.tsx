@@ -148,19 +148,23 @@ export const MonthlyHbInputModal: React.FC<MonthlyHbInputModalProps> = ({
 
   // Local state for all patients' Hb and date
   const [formData, setFormData] = useState<Record<string, { hbValue: string; hbDate: string }>>({});
+  const [initialFormData, setInitialFormData] = useState<Record<string, { hbValue: string; hbDate: string }>>({});
   const [searchTerm, setSearchTerm] = useState('');
   // Otomatis menampilkan Hari aktif saat dibuka
   const [scheduleFilter, setScheduleFilter] = useState<string>(() => getActiveHDDaySchedule());
   const [shiftFilter, setShiftFilter] = useState<string>('ALL');
   const [onlyPending, setOnlyPending] = useState(false);
   const [bulkDate, setBulkDate] = useState(realTimeToday);
+  // Status feedback tersimpan per-pasien
+  const [savedPatientId, setSavedPatientId] = useState<string | null>(null);
 
   // Inisialisasi data form:
   // 1. Pada sesi CEK HB SELURUH PASIEN:
-  //    Seluruh pasien Tn A, Tn B, Tn C dan Tn D pada bulan terkait nilai HB nya berstatus 0 (menunggu hasil lab)
+  //    Pasien yang belum diinputkan nilai labnya berstatus 0 (menunggu hasil lab).
+  //    Nilai pasien yang SUDAH diinputkan/disimpan di bulan ini TETAP DIPERTAHANKAN (tidak terhapus).
   // 2. Pada sesi CEK HB PILIHAN:
-  //    Pasien yang tidak terjadwal otomatis terisi nilai HB nya sesuai dengan nilai bulan sebelumnya karena tidak melakukan CEK HB.
-  //    Contoh: Tn A otomatis terisi nilai HB nya (12.0). Sedangkan Tn B, Tn C, dan Tn D terisi nilai 0 (Menunggu Hasil Lab).
+  //    Pasien tidak terjadwal (Hb >= 9.0) otomatis terisi nilai bulan sebelumnya.
+  //    Pasien terjadwal anemia (< 9.0) berstatus 0 (menunggu hasil lab).
   useEffect(() => {
     if (isOpen) {
       setScheduleFilter(getActiveHDDaySchedule());
@@ -171,7 +175,7 @@ export const MonthlyHbInputModal: React.FC<MonthlyHbInputModalProps> = ({
           activeMonth, 
           p.scheduleDay, 
           p.singleDay, 
-          p.hdFrequency,
+          p.hdFrequency, 
           p.lastHdDate
         ).dateString;
 
@@ -200,7 +204,7 @@ export const MonthlyHbInputModal: React.FC<MonthlyHbInputModalProps> = ({
           initialHb = String(p.labSchedule.resultHb);
         } else if (sessionMode === 'ALL_PATIENTS') {
           // ATURAN 1 (CEK HB SELURUH PASIEN):
-          // Seluruh pasien Tn A, Tn B, Tn C dan Tn D pada bulan terkait nilai HB nya berstatus 0 (menunggu hasil lab)
+          // Seluruh pasien (Tn A, Tn B, Tn C, Tn D) berstatus 0 (menunggu hasil lab)
           initialHb = '0';
         } else {
           // ATURAN 2 (CEK HB PILIHAN):
@@ -220,6 +224,7 @@ export const MonthlyHbInputModal: React.FC<MonthlyHbInputModalProps> = ({
       });
 
       setFormData(initial);
+      setInitialFormData(initial);
       setBulkDate(`${activeMonth}-01`);
     }
   }, [isOpen, patients, activeMonth, sessionMode]);
@@ -233,7 +238,7 @@ export const MonthlyHbInputModal: React.FC<MonthlyHbInputModalProps> = ({
     setFormData((prev) => {
       const next = { ...prev };
       patients.forEach((p) => {
-        const hasFinished = p.labSchedule?.status === 'Selesai' && p.labSchedule.resultHb;
+        const hasFinished = p.labSchedule?.status === 'Selesai' && typeof p.labSchedule.resultHb === 'number' && p.labSchedule.resultHb > 0;
         if (!hasFinished) {
           const routineDate = getFirstHDDateOfMonth(activeMonth, p.scheduleDay, p.singleDay, p.hdFrequency, p.lastHdDate).dateString;
           next[p.id] = {
@@ -242,6 +247,7 @@ export const MonthlyHbInputModal: React.FC<MonthlyHbInputModalProps> = ({
           };
         }
       });
+      setInitialFormData(next);
       return next;
     });
   };
@@ -259,7 +265,7 @@ export const MonthlyHbInputModal: React.FC<MonthlyHbInputModalProps> = ({
           ? p.prevHbValue
           : (p.hbDate && !p.hbDate.startsWith(activeMonth) && p.hbValue > 0 ? p.hbValue : (p.hbValue > 0 ? p.hbValue : 0));
         const isCand = isSelective(p);
-        const hasFinished = p.labSchedule?.status === 'Selesai' && p.labSchedule.resultHb;
+        const hasFinished = p.labSchedule?.status === 'Selesai' && typeof p.labSchedule.resultHb === 'number' && p.labSchedule.resultHb > 0;
         const routineDate = getFirstHDDateOfMonth(activeMonth, p.scheduleDay, p.singleDay, p.hdFrequency, p.lastHdDate).dateString;
 
         if (!hasFinished) {
@@ -276,8 +282,39 @@ export const MonthlyHbInputModal: React.FC<MonthlyHbInputModalProps> = ({
           }
         }
       });
+      setInitialFormData(next);
       return next;
     });
+  };
+
+  // Simpan nilai Hb KHUSUS satu pasien tanpa merubah nilai pasien lain
+  const handleSaveSinglePatient = (patient: PatientRecord) => {
+    const item = formData[patient.id];
+    const routineDate = getFirstHDDateOfMonth(
+      activeMonth, 
+      patient.scheduleDay, 
+      patient.singleDay, 
+      patient.hdFrequency, 
+      patient.lastHdDate
+    ).dateString;
+    const rawHb = item ? parseFloat(item.hbValue.replace(',', '.')) : 0;
+    const validHb = isNaN(rawHb) || rawHb < 0 ? 0 : rawHb;
+    const targetDate = item?.hbDate || routineDate;
+
+    const scopeMode: 'SELURUH' | 'PILIHAN' = sessionMode === 'ALL_PATIENTS' ? 'SELURUH' : 'PILIHAN';
+
+    // Kirim HANYA data satu pasien ini
+    onSaveBatchHb(
+      [{ id: patient.id, hbValue: validHb, hbDate: targetDate }],
+      activeMonth,
+      scopeMode
+    );
+
+    // Feedback animasi berhasil tersimpan pada baris pasien ini
+    setSavedPatientId(patient.id);
+    setTimeout(() => {
+      setSavedPatientId(null);
+    }, 2500);
   };
 
   if (!isOpen) return null;
@@ -361,11 +398,54 @@ export const MonthlyHbInputModal: React.FC<MonthlyHbInputModalProps> = ({
     setBulkDate(todayStr);
   };
 
+  // Deteksi pasien mana saja yang nilai input Hb / tanggalnya diubah oleh user pada sesi formulir ini
+  const modifiedPatients = patients.filter((p) => {
+    const current = formData[p.id];
+    const initial = initialFormData[p.id];
+    if (!current || !initial) return false;
+    return current.hbValue !== initial.hbValue || current.hbDate !== initial.hbDate;
+  });
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    const updateList: { id: string; hbValue: number; hbDate: string }[] = [];
     const scopeMode: 'SELURUH' | 'PILIHAN' = sessionMode === 'ALL_PATIENTS' ? 'SELURUH' : 'PILIHAN';
 
+    // 1. KASUS UTAMA: Jika user hanya menginputkan/mengubah SATU pasien saja di formulir ini,
+    // Tombol ini (button footer) langsung menyimpan HANYA pasien tersebut TANPA merubah pasien lain!
+    if (modifiedPatients.length === 1) {
+      const targetPatient = modifiedPatients[0];
+      handleSaveSinglePatient(targetPatient);
+      onClose();
+      return;
+    }
+
+    // 2. KASUS: Jika user mengubah beberapa pasien tertentu (lebih dari 1 tapi tidak semua)
+    if (modifiedPatients.length > 1 && modifiedPatients.length < patients.length) {
+      const updateList = modifiedPatients.map((p) => {
+        const item = formData[p.id];
+        const routineDate = getFirstHDDateOfMonth(
+          activeMonth, 
+          p.scheduleDay, 
+          p.singleDay, 
+          p.hdFrequency, 
+          p.lastHdDate
+        ).dateString;
+        const rawHb = item ? parseFloat(item.hbValue.replace(',', '.')) : 0;
+        const validHb = isNaN(rawHb) || rawHb < 0 ? 0 : rawHb;
+        return {
+          id: p.id,
+          hbValue: validHb,
+          hbDate: item?.hbDate || routineDate,
+        };
+      });
+
+      onSaveBatchHb(updateList, activeMonth, scopeMode);
+      onClose();
+      return;
+    }
+
+    // 3. KASUS: Batch simpan seluruh pasien sesuai aturan sesi
+    const updateList: { id: string; hbValue: number; hbDate: string }[] = [];
     try {
       localStorage.setItem('epocare_lab_schedule_mode_' + activeMonth, scopeMode);
       localStorage.setItem('epocare_lab_schedule_mode', scopeMode);
@@ -795,6 +875,12 @@ export const MonthlyHbInputModal: React.FC<MonthlyHbInputModalProps> = ({
                               max="24"
                               value={currentHbStr}
                               onChange={(e) => handleHbChange(patient.id, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleSaveSinglePatient(patient);
+                                }
+                              }}
                               placeholder="0.0"
                               className={`w-full pl-2 pr-6 py-0.5 rounded border font-mono font-bold text-xs bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:ring-1 focus:ring-rose-500 ${
                                 numericHb <= 0 
@@ -943,14 +1029,29 @@ export const MonthlyHbInputModal: React.FC<MonthlyHbInputModalProps> = ({
               type="button"
               onClick={handleSave}
               className={`h-8.5 inline-flex items-center gap-1.5 px-4 rounded-lg text-white font-semibold text-xs transition cursor-pointer shadow-xs ${
-                sessionMode === 'SELECTIVE_PATIENTS'
+                modifiedPatients.length === 1
+                  ? 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 ring-2 ring-emerald-300 dark:ring-emerald-700'
+                  : modifiedPatients.length > 1
+                  ? 'bg-teal-600 hover:bg-teal-700 active:bg-teal-800'
+                  : sessionMode === 'SELECTIVE_PATIENTS'
                   ? 'bg-amber-600 hover:bg-amber-700 active:bg-amber-800'
                   : 'bg-rose-700 hover:bg-rose-800 active:bg-rose-900'
               }`}
+              title={
+                modifiedPatients.length === 1
+                  ? `Simpan nilai Hb untuk ${modifiedPatients[0].name} tanpa merubah data pasien lain`
+                  : modifiedPatients.length > 1
+                  ? `Simpan nilai Hb untuk ${modifiedPatients.length} pasien yang diubah tanpa merubah pasien lain`
+                  : 'Simpan data nilai Hb'
+              }
             >
               <Save className="w-3.5 h-3.5" />
               <span>
-                {sessionMode === 'SELECTIVE_PATIENTS'
+                {modifiedPatients.length === 1
+                  ? `Simpan Nilai Hb (${modifiedPatients[0].name})`
+                  : modifiedPatients.length > 1
+                  ? `Simpan ${modifiedPatients.length} Pasien yang Diubah`
+                  : sessionMode === 'SELECTIVE_PATIENTS'
                   ? `Simpan Nilai Hb (${filteredPatients.length} Pasien Pilihan)`
                   : `Simpan Nilai Hb Seluruh Pasien (${patients.length} Pasien)`}
               </span>

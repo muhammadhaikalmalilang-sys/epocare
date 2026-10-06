@@ -1116,10 +1116,15 @@ export default function App() {
     const effectiveMonth = targetMonth || selectedMonth;
     const effectiveScope = scope || 'PILIHAN';
 
-    try {
-      localStorage.setItem('epocare_lab_schedule_mode_' + effectiveMonth, effectiveScope);
-      localStorage.setItem('epocare_lab_schedule_mode', effectiveScope);
-    } catch (e) {}
+    const isSingle = updatedHbList.length === 1;
+    const targetPat = isSingle ? patients.find((p) => p.id === updatedHbList[0].id) : null;
+
+    if (!isSingle) {
+      try {
+        localStorage.setItem('epocare_lab_schedule_mode_' + effectiveMonth, effectiveScope);
+        localStorage.setItem('epocare_lab_schedule_mode', effectiveScope);
+      } catch (e) {}
+    }
 
     const updateMap = new Map(updatedHbList.map((item) => [item.id, item]));
 
@@ -1233,13 +1238,20 @@ export default function App() {
       } catch (e) {}
     }
 
-    const isSelectiveMode = effectiveScope === 'PILIHAN';
-    setToastNotification({
-      type: 'success',
-      message: isSelectiveMode
-        ? `Berhasil memperbarui data Cek HB Pilihan untuk bulan ${effectiveMonth}! Pasien stabil (≥ 9.0) terisi otomatis nilai bulan lalu, pasien terjadwal anemia (< 9.0) berstatus 0 (Menunggu Hasil Lab).`
-        : `Berhasil memperbarui data Cek HB Seluruh Pasien untuk bulan ${effectiveMonth}! Seluruh pasien tanpa hasil lab berstatus 0 (Menunggu Hasil Lab).`,
-    });
+    if (isSingle && targetPat) {
+      setToastNotification({
+        type: 'success',
+        message: `Nilai Hb ${updatedHbList[0].hbValue.toFixed(1)} g/dL untuk ${targetPat.name} berhasil disimpan tanpa merubah nilai pasien lain.`,
+      });
+    } else {
+      const isSelectiveMode = effectiveScope === 'PILIHAN';
+      setToastNotification({
+        type: 'success',
+        message: isSelectiveMode
+          ? `Berhasil memperbarui data Cek HB Pilihan untuk bulan ${effectiveMonth}! Pasien stabil (≥ 9.0) terisi otomatis nilai bulan lalu, pasien terjadwal anemia (< 9.0) berstatus 0 (Menunggu Hasil Lab).`
+          : `Berhasil memperbarui data Cek HB Seluruh Pasien untuk bulan ${effectiveMonth}! Seluruh pasien tanpa hasil lab berstatus 0 (Menunggu Hasil Lab).`,
+      });
+    }
   };
 
   // Simpan Jadwal Cek Lab Manual & Cek Hb Pilihan
@@ -1496,7 +1508,7 @@ export default function App() {
         <PatientTable
           patients={patients}
           selectedMonth={selectedMonth}
-          onMonthChange={setSelectedMonth}
+          onMonthChange={handleMonthChange}
           onEditPatient={(patient) => {
             setEditingPatient(patient);
             setIsPatientModalOpen(true);
