@@ -653,14 +653,31 @@ export default function App() {
   const handleSavePatient = (patientData: Partial<PatientRecord>) => {
     if (editingPatient) {
       // Update existing
-      setPatients((prev) =>
-        prev.map((p) =>
-          p.id === editingPatient.id ? ({ ...p, ...patientData } as PatientRecord) : p
-        )
-      );
+      setPatients((prev) => {
+        const updated = prev.map((p) => {
+          if (p.id !== editingPatient.id) return p;
+          const merged: PatientRecord = {
+            ...p,
+            ...patientData,
+            id: p.id,
+            updatedAt: new Date().toISOString(),
+          };
+          return merged;
+        });
+
+        try {
+          localStorage.setItem('dialysis_patients_data_' + selectedMonth, JSON.stringify(updated));
+          localStorage.setItem('dialysis_patients_data', JSON.stringify(updated));
+        } catch (e) {
+          console.error('Failed to save updated patient:', e);
+        }
+
+        return updated;
+      });
+
       setToastNotification({
         type: 'success',
-        message: `Data pasien ${patientData.name || ''} berhasil diperbarui.`,
+        message: `Data pasien ${patientData.name || editingPatient.name} berhasil diperbarui.`,
       });
     } else {
       // Create new
@@ -685,7 +702,14 @@ export default function App() {
         doctorInCharge: patientData.doctorInCharge || 'dr. Sp.PD-KGH',
         updatedAt: new Date().toISOString(),
       };
-      setPatients((prev) => [newPatient, ...prev]);
+      setPatients((prev) => {
+        const updated = [newPatient, ...prev];
+        try {
+          localStorage.setItem('dialysis_patients_data_' + selectedMonth, JSON.stringify(updated));
+          localStorage.setItem('dialysis_patients_data', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
       setToastNotification({
         type: 'success',
         message: `Pasien baru ${newPatient.name} ditambahkan ke alokasi bulan ini.`,

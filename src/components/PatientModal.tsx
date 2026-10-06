@@ -55,8 +55,10 @@ export const PatientModal: React.FC<PatientModalProps> = ({
 
   const [clinicalNotes, setClinicalNotes] = useState<string>('');
   const [doctorInCharge, setDoctorInCharge] = useState<string>('dr. Sp.PD-KGH');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
+    setErrorMsg(null);
     if (initialPatient) {
       setNoRm(initialPatient.noRm);
       setName(initialPatient.name);
@@ -127,9 +129,10 @@ export const PatientModal: React.FC<PatientModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !noRm.trim()) {
-      alert('Mohon isi No. RM dan Nama Pasien.');
+      setErrorMsg('Mohon lengkapi No. RM dan Nama Pasien sebelum menyimpan.');
       return;
     }
+    setErrorMsg(null);
 
     const reco = calculateClinicalRecommendation(validHb, hdFrequency);
     const isCategoryChanged = initialPatient ? initialPatient.recommendation?.category !== reco.category : false;
@@ -138,14 +141,23 @@ export const PatientModal: React.FC<PatientModalProps> = ({
       ? getScheduleDayFromSingleDay(singleDay) 
       : scheduleDay;
 
-    const weeks = (initialPatient && !isCategoryChanged)
+    const isScheduleChanged = Boolean(
+      initialPatient && (
+        initialPatient.scheduleDay !== finalScheduleDay ||
+        initialPatient.hdFrequency !== hdFrequency ||
+        initialPatient.singleDay !== (isSingleOrBiweekly ? singleDay : undefined) ||
+        initialPatient.lastHdDate !== lastHdDate
+      )
+    );
+
+    const weeks = (initialPatient && !isCategoryChanged && !isScheduleChanged)
       ? initialPatient.weeks 
       : generateDefaultWeeks(
           reco.category, 
           currentMonth, 
           hdFrequency, 
           finalScheduleDay, 
-          singleDay, 
+          isSingleOrBiweekly ? singleDay : undefined, 
           lastHdDate
         );
 
@@ -158,23 +170,39 @@ export const PatientModal: React.FC<PatientModalProps> = ({
     ).dateString;
 
     const parsedPrev = prevHbValue ? parseFloat(prevHbValue.replace(',', '.')) : undefined;
-    const validPrev = parsedPrev !== undefined && !isNaN(parsedPrev) && parsedPrev > 0 ? parsedPrev : undefined;
+    const validPrev = parsedPrev !== undefined && !isNaN(parsedPrev) && parsedPrev > 0 
+      ? parsedPrev 
+      : (initialPatient?.prevHbValue !== undefined && initialPatient.prevHbValue > 0 ? initialPatient.prevHbValue : undefined);
+    
     const isSelective = (validPrev !== undefined && Number(validPrev.toFixed(1)) <= 8.9) ||
       (validPrev === undefined && validHb > 0 && Number(validHb.toFixed(1)) <= 8.9) ||
       (isSelectiveHb && (validPrev === undefined || Number(validPrev.toFixed(1)) <= 8.9));
+
+    // Sinkronisasi status jadwal laboratorium secara otomatis dengan nilai Hb:
+    // Jika Hb > 0, status hasil lab otomatis 'Selesai'. Jika Hb = 0, status 'Terjadwal'.
+    let effectiveLabStatus: LabScheduleStatus = labStatus;
+    if (validHb > 0) {
+      effectiveLabStatus = 'Selesai';
+    } else if (effectiveLabStatus === 'Selesai') {
+      effectiveLabStatus = 'Terjadwal';
+    }
 
     const finalLabScheduledDate = labScheduledDate || hbDate || defaultHbDate;
     const finalLabSchedule: LabSchedule = {
       scheduledDate: finalLabScheduledDate,
       testType: isSelective ? 'Cek Hb Pilihan (Hb ≤ 8.9)' : (labTestType.includes('Pilihan') ? 'Rutin Hb (Evaluasi EPO)' : labTestType),
-      status: labStatus,
+      status: effectiveLabStatus,
       notes: labNotes.trim(),
       resultHb: validHb > 0 ? validHb : undefined,
+      completedAt: validHb > 0 ? (initialPatient?.labSchedule?.completedAt || new Date().toISOString()) : undefined,
       isSelectiveHb: isSelective,
       selectiveReason: isSelective ? `Nilai Hb acuan ${validPrev ? validPrev.toFixed(1) : '≤ 8.9'} mg/dL (≤ 8.9 mg/dL)` : undefined,
     };
 
+    const dailyRecords = (isCategoryChanged || isScheduleChanged) ? undefined : initialPatient?.dailyRecords;
+
     onSave({
+      id: initialPatient?.id,
       noRm: noRm.trim(),
       name: name.trim(),
       age: age ? parseInt(age, 10) : undefined,
@@ -192,6 +220,7 @@ export const PatientModal: React.FC<PatientModalProps> = ({
       monthPeriod: currentMonth,
       recommendation: reco,
       weeks,
+      dailyRecords,
       clinicalNotes: clinicalNotes.trim(),
       doctorInCharge: doctorInCharge.trim(),
       overallStatus: validHb === 0 ? 'Menunggu' : reco.category === 'TRANSFUSI_2_RAWAT_INAP' ? 'Perlu Perhatian' : 'Berjalan',
@@ -234,6 +263,14 @@ export const PatientModal: React.FC<PatientModalProps> = ({
           
           {/* Scrollable Body (Compact & Minimalist) */}
           <div className="p-3 space-y-2 text-xs overflow-y-auto flex-1">
+            
+            {/* Error Banner jika input tidak valid */}
+            {errorMsg && (
+              <div className="p-2 rounded-lg bg-rose-50 dark:bg-rose-950/60 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span className="font-semibold">{errorMsg}</span>
+              </div>
+            )}
             
             {/* Identitas Pasien: No. RM & Nama */}
             <div className="grid grid-cols-3 gap-1.5">
