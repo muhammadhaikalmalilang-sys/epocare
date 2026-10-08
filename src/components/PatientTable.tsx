@@ -69,6 +69,8 @@ interface PatientTableProps {
   onOpenEpoSchedulePrintModal?: () => void;
   onPushToSheet?: (targetSchedule?: HDDaySchedule) => Promise<void>;
   isSyncing?: boolean;
+  autoSyncEnabled?: boolean;
+  onToggleAutoSync?: () => void;
 }
 
 export const PatientTable: React.FC<PatientTableProps> = ({
@@ -87,6 +89,8 @@ export const PatientTable: React.FC<PatientTableProps> = ({
   onOpenEpoSchedulePrintModal,
   onPushToSheet,
   isSyncing = false,
+  autoSyncEnabled = true,
+  onToggleAutoSync,
 }) => {
   // Jadwal HD Aktif Hari Ini (Otomatis deteksi real-time)
   const todayActiveSchedule = getActiveHDDaySchedule();

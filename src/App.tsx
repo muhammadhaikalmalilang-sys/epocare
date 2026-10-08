@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User } from 'firebase/auth';
 import { Header } from './components/Header';
 import { DashboardStats } from './components/DashboardStats';
@@ -411,7 +411,66 @@ export default function App() {
     message: string;
   } | null>(null);
 
-  // Auto-hide toast notification
+  // Auto-Sync ke Google Sheets (Otomatis edit data di Google Sheet tanpa harus klik kirim manual)
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem('epocare_auto_sync_enabled');
+      return stored !== null ? stored === 'true' : true; // Default AKTIF
+    } catch (e) {
+      return true;
+    }
+  });
+
+  const autoSyncDebounceTimer = useRef<NodeJS.Timeout | null>(null);
+
+  const triggerAutoSync = (
+    updatedPatientsList: PatientRecord[], 
+    targetScope?: LabScheduleScope,
+    targetSchedule?: HDDaySchedule
+  ) => {
+    if (!autoSyncEnabled) return;
+    const url = spreadsheetConfig?.appsScriptUrl || DEFAULT_APPS_SCRIPT_URL;
+    if (!url && !spreadsheetConfig?.spreadsheetId) return;
+
+    if (autoSyncDebounceTimer.current) {
+      clearTimeout(autoSyncDebounceTimer.current);
+    }
+
+    // 500ms debounce cepat & responsif
+    autoSyncDebounceTimer.current = setTimeout(async () => {
+      setIsSyncing(true);
+      try {
+        if (url) {
+          await pushViaAppsScript(url, updatedPatientsList, selectedMonth, targetSchedule, targetScope);
+        } else if (spreadsheetConfig?.spreadsheetId) {
+          const token = await getAccessToken();
+          if (token) {
+            await pushPatientsToSheet(spreadsheetConfig.spreadsheetId, updatedPatientsList, token, selectedMonth, targetSchedule, targetScope);
+          }
+        }
+      } catch (err) {
+        console.warn('Auto-sync background error:', err);
+      } finally {
+        setIsSyncing(false);
+      }
+    }, 500);
+  };
+
+  const toggleAutoSync = () => {
+    setAutoSyncEnabled((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('epocare_auto_sync_enabled', String(next));
+      } catch (e) {}
+      setToastNotification({
+        type: next ? 'success' : 'info',
+        message: next
+          ? '⚡ Auto-Sync ke Google Sheets Diaktifkan! Setiap pengeditan data pasien/Hb akan langsung mengedit data di Google Sheet secara otomatis.'
+          : 'Auto-Sync Dimatikan. Pengiriman data ke Google Sheet menggunakan tombol Kirim manual.',
+      });
+      return next;
+    });
+  };
   useEffect(() => {
     if (toastNotification) {
       const timer = setTimeout(() => {
@@ -653,17 +712,25 @@ export default function App() {
   const handleSavePatient = (patientData: Partial<PatientRecord>) => {
     if (editingPatient) {
       // Update existing
+      let savedList: PatientRecord[] = [];
       setPatients((prev) => {
         const updated = prev.map((p) => {
-          if (p.id !== editingPatient.id) return p;
+          const isMatch = p.id === editingPatient.id || (
+            Boolean(p.noRm && editingPatient.noRm) && 
+            p.noRm.toLowerCase().trim() === editingPatient.noRm.toLowerCase().trim()
+          );
+          if (!isMatch) return p;
           const merged: PatientRecord = {
             ...p,
             ...patientData,
             id: p.id,
+            dailyRecords: patientData.dailyRecords !== undefined ? patientData.dailyRecords : (p.dailyRecords || {}),
             updatedAt: new Date().toISOString(),
           };
           return merged;
         });
+
+        savedList = updated;
 
         try {
           localStorage.setItem('dialysis_patients_data_' + selectedMonth, JSON.stringify(updated));
@@ -675,10 +742,59 @@ export default function App() {
         return updated;
       });
 
+      // Sinkronisasi perubahan identitas (Nama, No. RM, Shift, Jadwal, Frekuensi, DPJP) ke seluruh cache bulan di localStorage
+      try {
+        const allKeys = Object.keys(localStorage);
+        for (const key of allKeys) {
+          if (key.startsWith('dialysis_patients_data_') && key !== 'dialysis_patients_data_' + selectedMonth) {
+            const raw = localStorage.getItem(key);
+            if (raw) {
+              const list = JSON.parse(raw);
+              if (Array.isArray(list)) {
+                let touched = false;
+                const nextList = list.map((p: PatientRecord) => {
+                  const isMatch = p.id === editingPatient.id || (
+                    Boolean(p.noRm && editingPatient.noRm) && 
+                    p.noRm.toLowerCase().trim() === editingPatient.noRm.toLowerCase().trim()
+                  );
+                  if (!isMatch) return p;
+                  touched = true;
+                  return {
+                    ...p,
+                    name: patientData.name !== undefined ? patientData.name : p.name,
+                    noRm: patientData.noRm !== undefined ? patientData.noRm : p.noRm,
+                    age: patientData.age !== undefined ? patientData.age : p.age,
+                    gender: patientData.gender !== undefined ? patientData.gender : p.gender,
+                    scheduleDay: patientData.scheduleDay !== undefined ? patientData.scheduleDay : p.scheduleDay,
+                    scheduleShift: patientData.scheduleShift !== undefined ? patientData.scheduleShift : p.scheduleShift,
+                    hdFrequency: patientData.hdFrequency !== undefined ? patientData.hdFrequency : p.hdFrequency,
+                    singleDay: patientData.singleDay !== undefined ? patientData.singleDay : p.singleDay,
+                    lastHdDate: patientData.lastHdDate !== undefined ? patientData.lastHdDate : p.lastHdDate,
+                    doctorInCharge: patientData.doctorInCharge !== undefined ? patientData.doctorInCharge : p.doctorInCharge,
+                    updatedAt: new Date().toISOString(),
+                  };
+                });
+                if (touched) {
+                  localStorage.setItem(key, JSON.stringify(nextList));
+                }
+              }
+            }
+          }
+        }
+      } catch (syncErr) {
+        console.warn('Cross-month demographic sync warning:', syncErr);
+      }
+
       setToastNotification({
         type: 'success',
-        message: `Data pasien ${patientData.name || editingPatient.name} berhasil diperbarui.`,
+        message: autoSyncEnabled
+          ? `Perubahan data pasien ${patientData.name || editingPatient.name} berhasil disimpan & disinkronkan langsung ke Google Sheets!`
+          : `Perubahan data pasien ${patientData.name || editingPatient.name} berhasil disimpan.`,
       });
+
+      if (autoSyncEnabled && savedList.length > 0) {
+        triggerAutoSync(savedList, undefined, (patientData.scheduleDay || editingPatient.scheduleDay) as HDDaySchedule);
+      }
     } else {
       // Create new
       const newPatient: PatientRecord = {
@@ -697,13 +813,16 @@ export default function App() {
         monthPeriod: selectedMonth,
         recommendation: patientData.recommendation!,
         weeks: patientData.weeks!,
+        dailyRecords: patientData.dailyRecords || {},
         overallStatus: patientData.overallStatus || 'Berjalan',
         clinicalNotes: patientData.clinicalNotes,
         doctorInCharge: patientData.doctorInCharge || 'dr. Sp.PD-KGH',
         updatedAt: new Date().toISOString(),
       };
+      let savedList: PatientRecord[] = [];
       setPatients((prev) => {
         const updated = [newPatient, ...prev];
+        savedList = updated;
         try {
           localStorage.setItem('dialysis_patients_data_' + selectedMonth, JSON.stringify(updated));
           localStorage.setItem('dialysis_patients_data', JSON.stringify(updated));
@@ -712,8 +831,13 @@ export default function App() {
       });
       setToastNotification({
         type: 'success',
-        message: `Pasien baru ${newPatient.name} ditambahkan ke alokasi bulan ini.`,
+        message: autoSyncEnabled
+          ? `Pasien baru ${newPatient.name} ditambahkan & disinkronkan langsung ke Google Sheets!`
+          : `Pasien baru ${newPatient.name} ditambahkan ke alokasi bulan ini.`,
       });
+      if (autoSyncEnabled && savedList.length > 0) {
+        triggerAutoSync(savedList, undefined, newPatient.scheduleDay);
+      }
     }
     setEditingPatient(null);
   };
@@ -877,11 +1001,21 @@ export default function App() {
     );
     if (!confirmed) return;
 
-    setPatients((prev) => prev.filter((p) => p.id !== patientId));
+    let remainingList: PatientRecord[] = [];
+    setPatients((prev) => {
+      const filtered = prev.filter((p) => p.id !== patientId);
+      remainingList = filtered;
+      return filtered;
+    });
     setToastNotification({
       type: 'info',
-      message: `Pasien ${target?.name || ''} telah dihapus dari daftar.`,
+      message: autoSyncEnabled
+        ? `Pasien ${target?.name || ''} telah dihapus dan disinkronkan ke Google Sheets.`
+        : `Pasien ${target?.name || ''} telah dihapus dari daftar.`,
     });
+    if (autoSyncEnabled) {
+      triggerAutoSync(remainingList);
+    }
   };
 
   // Update Week Status (M1, M2, M3, M4)
@@ -891,8 +1025,9 @@ export default function App() {
     newStatus: DoseStatus,
     nurseName?: string
   ) => {
-    setPatients((prev) =>
-      prev.map((patient) => {
+    let updatedList: PatientRecord[] = [];
+    setPatients((prev) => {
+      const next = prev.map((patient) => {
         if (patient.id !== patientId) return patient;
 
         const currentWeek = patient.weeks[weekKey];
@@ -933,8 +1068,15 @@ export default function App() {
           overallStatus,
           updatedAt: new Date().toISOString(),
         };
-      })
-    );
+      });
+      updatedList = next;
+      return next;
+    });
+
+    if (autoSyncEnabled && updatedList.length > 0) {
+      const pat = patients.find((p) => p.id === patientId);
+      triggerAutoSync(updatedList, undefined, pat?.scheduleDay);
+    }
   };
 
   // Update Date-level action (Injeksi Diberikan, Tunda ke Hari Kedua, Reset, dll)
@@ -945,8 +1087,9 @@ export default function App() {
     nurseName?: string,
     notes?: string
   ) => {
-    setPatients((prev) =>
-      prev.map((patient) => {
+    let updatedList: PatientRecord[] = [];
+    setPatients((prev) => {
+      const next = prev.map((patient) => {
         if (patient.id !== patientId) return patient;
 
         const monthInfo = getMonthDaysInfo(selectedMonth);
@@ -1097,8 +1240,15 @@ export default function App() {
           overallStatus,
           updatedAt: new Date().toISOString(),
         };
-      })
-    );
+      });
+      updatedList = next;
+      return next;
+    });
+
+    if (autoSyncEnabled && updatedList.length > 0) {
+      const pat = patients.find((p) => p.id === patientId);
+      triggerAutoSync(updatedList, undefined, pat?.scheduleDay);
+    }
   };
 
   // Bulk Import Patients Handler
@@ -1244,9 +1394,11 @@ export default function App() {
       };
     };
 
+    let finalHbUpdatedList: PatientRecord[] = [];
     if (effectiveMonth === selectedMonth) {
       setPatients((prev) => {
         const updated = prev.map(updatePatientItem);
+        finalHbUpdatedList = updated;
         try {
           localStorage.setItem('dialysis_patients_data_' + effectiveMonth, JSON.stringify(updated));
           localStorage.setItem('dialysis_patients_data', JSON.stringify(updated));
@@ -1258,8 +1410,13 @@ export default function App() {
         const raw = localStorage.getItem('dialysis_patients_data_' + effectiveMonth);
         const existing = raw ? JSON.parse(raw) : patients;
         const updated = (existing as PatientRecord[]).map(updatePatientItem);
+        finalHbUpdatedList = updated;
         localStorage.setItem('dialysis_patients_data_' + effectiveMonth, JSON.stringify(updated));
       } catch (e) {}
+    }
+
+    if (autoSyncEnabled && finalHbUpdatedList.length > 0) {
+      triggerAutoSync(finalHbUpdatedList, effectiveScope);
     }
 
     if (isSingle && targetPat) {
@@ -1426,6 +1583,10 @@ export default function App() {
       setPatients(targetMonthPatients);
     }
 
+    if (autoSyncEnabled && targetMonthPatients.length > 0) {
+      triggerAutoSync(targetMonthPatients, effectiveScope);
+    }
+
     const isScopePilihan = effectiveScope === 'PILIHAN';
     const scheduledCount = updatedSchedules.filter((s) => s.labSchedule.status === 'Terjadwal').length;
     setToastNotification({
@@ -1495,6 +1656,8 @@ export default function App() {
           isLoggingIn={isLoggingIn}
           pendingHbCount={pendingHbCount}
           scheduledLabCount={scheduledLabCount}
+          autoSyncEnabled={autoSyncEnabled}
+          onToggleAutoSync={toggleAutoSync}
         />
       </div>
 
@@ -1554,6 +1717,8 @@ export default function App() {
           onOpenEpoSchedulePrintModal={() => setIsEpoSchedulePrintModalOpen(true)}
           onPushToSheet={handleQuickPushToSheet}
           isSyncing={isSyncing}
+          autoSyncEnabled={autoSyncEnabled}
+          onToggleAutoSync={toggleAutoSync}
         />
 
       </main>
@@ -1597,6 +1762,8 @@ export default function App() {
           setIsExportExcelModalOpen(true);
         }}
         selectedMonth={selectedMonth}
+        autoSyncEnabled={autoSyncEnabled}
+        onToggleAutoSync={toggleAutoSync}
       />
 
       <ClinicalCalculatorModal

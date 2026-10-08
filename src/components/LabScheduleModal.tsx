@@ -618,7 +618,7 @@ export const LabScheduleModal: React.FC<LabScheduleModalProps> = ({
                 onClick={handleSaveAndSync}
                 disabled={isSyncing}
                 className="h-7.5 px-3 rounded-lg text-xs font-bold bg-rose-700 hover:bg-rose-800 text-white shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                title="Simpan dan sinkronisasikan lembar JADWAL_CEK_HB ke Google Sheets"
+                title="Simpan dan sinkronisasikan lembar MATRIK CEK HB ke Google Sheets"
               >
                 <Share2 className="w-3.5 h-3.5" />
                 <span>{isSyncing ? 'Menyinkronkan...' : 'Kirim ke Google Sheets'}</span>

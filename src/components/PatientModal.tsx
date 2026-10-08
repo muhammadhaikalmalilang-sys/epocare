@@ -57,8 +57,11 @@ export const PatientModal: React.FC<PatientModalProps> = ({
   const [doctorInCharge, setDoctorInCharge] = useState<string>('dr. Sp.PD-KGH');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const [isSaving, setIsSaving] = useState(false);
+
   useEffect(() => {
     setErrorMsg(null);
+    setIsSaving(false);
     if (initialPatient) {
       setNoRm(initialPatient.noRm);
       setName(initialPatient.name);
@@ -80,15 +83,15 @@ export const PatientModal: React.FC<PatientModalProps> = ({
 
       // Load Jadwal Cek Lab Manual
       if (initialPatient.labSchedule) {
-        setLabScheduledDate(initialPatient.labSchedule.scheduledDate);
-        setLabTestType(initialPatient.labSchedule.testType);
-        setLabStatus(initialPatient.labSchedule.status);
+        setLabScheduledDate(initialPatient.labSchedule.scheduledDate || '');
+        setLabTestType(initialPatient.labSchedule.testType || 'Rutin Hb (Evaluasi EPO)');
+        setLabStatus(initialPatient.labSchedule.status || 'Terjadwal');
         setLabNotes(initialPatient.labSchedule.notes || '');
       } else {
         const isCandidate = (initialPatient.prevHbValue !== undefined && initialPatient.prevHbValue < 9.0) || 
                             (initialPatient.hbValue > 0 && initialPatient.hbValue < 9.0);
         setLabScheduledDate(initialPatient.hbDate || '');
-        setLabTestType(isCandidate ? 'Cek Hb Pilihan (Hb < 9.0)' : 'Rutin Hb (Evaluasi EPO)');
+        setLabTestType(isCandidate ? 'Cek Hb Pilihan (Hb ≤ 8.9)' : 'Rutin Hb (Evaluasi EPO)');
         setLabStatus(initialPatient.hbValue > 0 ? 'Selesai' : 'Terjadwal');
         setLabNotes(isCandidate ? '⭐ Cek Hb Pilihan: Riwayat Hb < 9.0 g/dL' : '');
       }
@@ -133,6 +136,7 @@ export const PatientModal: React.FC<PatientModalProps> = ({
       return;
     }
     setErrorMsg(null);
+    setIsSaving(true);
 
     const reco = calculateClinicalRecommendation(validHb, hdFrequency);
     const isCategoryChanged = initialPatient ? initialPatient.recommendation?.category !== reco.category : false;
@@ -150,16 +154,32 @@ export const PatientModal: React.FC<PatientModalProps> = ({
       )
     );
 
-    const weeks = (initialPatient && !isCategoryChanged && !isScheduleChanged)
-      ? initialPatient.weeks 
-      : generateDefaultWeeks(
-          reco.category, 
-          currentMonth, 
-          hdFrequency, 
-          finalScheduleDay, 
-          isSingleOrBiweekly ? singleDay : undefined, 
-          lastHdDate
-        );
+    // Regenerasi minggu hanya jika kategori/jadwal berubah, namun tetap pertahankan status pemberian riil jika ada
+    let weeks = initialPatient?.weeks;
+    if (!weeks || isCategoryChanged || isScheduleChanged) {
+      const generated = generateDefaultWeeks(
+        reco.category, 
+        currentMonth, 
+        hdFrequency, 
+        finalScheduleDay, 
+        isSingleOrBiweekly ? singleDay : undefined, 
+        lastHdDate
+      );
+      if (initialPatient?.weeks) {
+        // Pertahankan status 'Diberikan' yang sudah dilakukan perawat
+        (['week1', 'week2', 'week3', 'week4'] as const).forEach((wKey) => {
+          if (initialPatient.weeks[wKey]?.status === 'Diberikan' && generated[wKey]) {
+            generated[wKey] = {
+              ...generated[wKey],
+              status: 'Diberikan',
+              administeredAt: initialPatient.weeks[wKey].administeredAt,
+              administeredBy: initialPatient.weeks[wKey].administeredBy,
+            };
+          }
+        });
+      }
+      weeks = generated;
+    }
 
     const defaultHbDate = getFirstHDDateOfMonth(
       currentMonth, 
@@ -169,37 +189,41 @@ export const PatientModal: React.FC<PatientModalProps> = ({
       lastHdDate
     ).dateString;
 
-    const parsedPrev = prevHbValue ? parseFloat(prevHbValue.replace(',', '.')) : undefined;
-    const validPrev = parsedPrev !== undefined && !isNaN(parsedPrev) && parsedPrev > 0 
-      ? parsedPrev 
-      : (initialPatient?.prevHbValue !== undefined && initialPatient.prevHbValue > 0 ? initialPatient.prevHbValue : undefined);
+    // Evaluasi Hb acuan bulan sebelumnya secara akurat
+    const trimmedPrev = prevHbValue.trim();
+    const parsedPrev = trimmedPrev ? parseFloat(trimmedPrev.replace(',', '.')) : undefined;
+    const validPrev = (parsedPrev !== undefined && !isNaN(parsedPrev) && parsedPrev > 0)
+      ? parsedPrev
+      : undefined;
     
     const isSelective = (validPrev !== undefined && Number(validPrev.toFixed(1)) <= 8.9) ||
       (validPrev === undefined && validHb > 0 && Number(validHb.toFixed(1)) <= 8.9) ||
       (isSelectiveHb && (validPrev === undefined || Number(validPrev.toFixed(1)) <= 8.9));
 
-    // Sinkronisasi status jadwal laboratorium secara otomatis dengan nilai Hb:
-    // Jika Hb > 0, status hasil lab otomatis 'Selesai'. Jika Hb = 0, status 'Terjadwal'.
+    // Sinkronisasi status jadwal laboratorium secara cerdas:
+    // Jika Hb > 0 dan status saat ini masih 'Terjadwal', otomatis set 'Selesai'.
+    // Namun jika user memilih status khusus (misal 'Ditunda'), hormati pilihan user.
     let effectiveLabStatus: LabScheduleStatus = labStatus;
-    if (validHb > 0) {
+    if (validHb > 0 && effectiveLabStatus === 'Terjadwal') {
       effectiveLabStatus = 'Selesai';
-    } else if (effectiveLabStatus === 'Selesai') {
+    } else if (validHb === 0 && effectiveLabStatus === 'Selesai') {
       effectiveLabStatus = 'Terjadwal';
     }
 
     const finalLabScheduledDate = labScheduledDate || hbDate || defaultHbDate;
     const finalLabSchedule: LabSchedule = {
       scheduledDate: finalLabScheduledDate,
-      testType: isSelective ? 'Cek Hb Pilihan (Hb ≤ 8.9)' : (labTestType.includes('Pilihan') ? 'Rutin Hb (Evaluasi EPO)' : labTestType),
+      testType: isSelective ? 'Cek Hb Pilihan (Hb ≤ 8.9)' : labTestType,
       status: effectiveLabStatus,
       notes: labNotes.trim(),
       resultHb: validHb > 0 ? validHb : undefined,
       completedAt: validHb > 0 ? (initialPatient?.labSchedule?.completedAt || new Date().toISOString()) : undefined,
       isSelectiveHb: isSelective,
-      selectiveReason: isSelective ? `Nilai Hb acuan ${validPrev ? validPrev.toFixed(1) : '≤ 8.9'} mg/dL (≤ 8.9 mg/dL)` : undefined,
+      selectiveReason: isSelective ? `Nilai Hb acuan ${validPrev ? validPrev.toFixed(1) : '≤ 8.9'} g/dL (≤ 8.9 g/dL)` : undefined,
     };
 
-    const dailyRecords = (isCategoryChanged || isScheduleChanged) ? undefined : initialPatient?.dailyRecords;
+    // Pastikan dailyRecords tidak pernah undefined agar data tindakan petugas tidak terhapus
+    const dailyRecords = initialPatient?.dailyRecords || {};
 
     onSave({
       id: initialPatient?.id,
@@ -783,9 +807,17 @@ export const PatientModal: React.FC<PatientModalProps> = ({
             </button>
             <button
               type="submit"
-              className="h-8.5 px-4 rounded-lg font-semibold text-xs text-white bg-rose-700 hover:bg-rose-800 active:bg-rose-900 shadow-xs transition cursor-pointer"
+              disabled={isSaving}
+              className="h-8.5 px-4 rounded-lg font-semibold text-xs text-white bg-rose-700 hover:bg-rose-800 active:bg-rose-900 disabled:opacity-60 shadow-xs transition cursor-pointer flex items-center gap-1.5"
             >
-              {initialPatient ? 'Simpan Perubahan' : 'Tambah Pasien'}
+              {isSaving ? (
+                <>
+                  <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0" />
+                  <span>Menyimpan...</span>
+                </>
+              ) : (
+                <span>{initialPatient ? 'Simpan Perubahan' : 'Tambah Pasien'}</span>
+              )}
             </button>
           </div>
 

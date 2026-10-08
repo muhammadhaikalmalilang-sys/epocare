@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { PatientRecord, HDDaySchedule } from '../types/dialysis';
-import { buildScheduleMatrixTable, buildYearlySummaryTable, buildNextMonthLabScheduleTable, buildNextMonthCalendarMatrix, getMonthDaysInfo, SCHEDULE_SHEETS } from './googleSheets';
+import { buildScheduleMatrixTable, buildYearlySummaryTable, buildNextMonthCalendarMatrix, getMonthDaysInfo, SCHEDULE_SHEETS } from './googleSheets';
 import { getEffectivePatientHb, getEffectivePatientRecommendation } from './clinicalRules';
 
 export interface ExcelExportOptions {
@@ -285,36 +285,7 @@ export function exportDialysisToExcel(
     XLSX.utils.book_append_sheet(wb, wsYearly, 'REKAP_HB_TAHUNAN');
     sheetCount++;
 
-    // 4. Tambahkan Tab JADWAL_CEK_HB (Penjadwalan Cek Hb Bulan Selanjutnya)
-    const labRows = buildNextMonthLabScheduleTable(patients, period);
-    const wsLab = XLSX.utils.aoa_to_sheet(labRows);
-    wsLab['!cols'] = [
-      { wch: 6 },  // No
-      { wch: 16 }, // Tanggal Terjadwal
-      { wch: 12 }, // Hari
-      { wch: 15 }, // Shift HD
-      { wch: 16 }, // Jadwal Rutin
-      { wch: 14 }, // No RM
-      { wch: 28 }, // Nama Pasien
-      { wch: 14 }, // Frekuensi HD
-      { wch: 14 }, // Hb Terakhir
-      { wch: 26 }, // Kategori Pemeriksaan
-      { wch: 26 }, // Rekomendasi Terapi
-      { wch: 14 }, // Status Sampling
-      { wch: 16 }, // Hasil Lab Hb Baru
-      { wch: 26 }, // Paraf / Catatan
-    ];
-    wsLab['!freeze'] = {
-      xSplit: 4,
-      ySplit: 1,
-      topLeftCell: 'E2',
-      activePane: 'bottomRight',
-      state: 'frozen',
-    };
-    XLSX.utils.book_append_sheet(wb, wsLab, 'JADWAL_CEK_HB');
-    sheetCount++;
-
-    // 5. Tambahkan Tab MATRIKS_CEK_HB (Matriks 6 Hari Sesi Pertama HD)
+    // 4. Tambahkan Tab MATRIK CEK HB (Matriks 6 Hari Sesi Pertama HD)
     const matRows = buildNextMonthCalendarMatrix(patients, period);
     const wsMat = XLSX.utils.aoa_to_sheet(matRows);
     wsMat['!cols'] = new Array(matRows[0]?.length || 6).fill({ wch: 30 });
@@ -325,7 +296,7 @@ export function exportDialysisToExcel(
       activePane: 'bottomLeft',
       state: 'frozen',
     };
-    XLSX.utils.book_append_sheet(wb, wsMat, 'MATRIKS_CEK_HB');
+    XLSX.utils.book_append_sheet(wb, wsMat, 'MATRIK_CEK_HB');
     sheetCount++;
   }
 

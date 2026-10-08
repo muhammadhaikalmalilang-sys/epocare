@@ -112,7 +112,7 @@ export const WorkflowGuideModal: React.FC<WorkflowGuideModalProps> = ({
       points: [
         'Pasien dengan Hb evaluasi < 9.0 g/dL otomatis masuk Kategori Cek Hb Pilihan bulan depan.',
         'Pasien dengan Hb ≥ 9.0 g/dL dijadwalkan dalam Kategori Rutin Hb.',
-        'Sinkronkan lembar JADWAL_CEK_HB dan MATRIKS_CEK_HB (6 hari sesi pertama) ke Google Sheets.'
+        'Sinkronkan lembar MATRIK CEK HB (6 hari sesi pertama) dan REKAP HB TAHUNAN ke Google Sheets.'
       ]
     }
   ];

@@ -44,6 +44,8 @@ interface HeaderProps {
   isLoggingIn: boolean;
   pendingHbCount?: number;
   scheduledLabCount?: number;
+  autoSyncEnabled?: boolean;
+  onToggleAutoSync?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -67,6 +69,8 @@ export const Header: React.FC<HeaderProps> = ({
   isLoggingIn,
   pendingHbCount,
   scheduledLabCount,
+  autoSyncEnabled = true,
+  onToggleAutoSync,
 }) => {
   const isConnected = Boolean(
     spreadsheetConfig?.appsScriptUrl || 
@@ -211,19 +215,19 @@ export const Header: React.FC<HeaderProps> = ({
               <span>Ekspor Excel</span>
             </button>
 
-            {/* 7. Sheets Aktif */}
+            {/* 7. Sheets Aktif (Buka Modal Sinkronisasi Google Sheets) */}
             <button
               onClick={onOpenSyncModal}
               disabled={isSyncing}
-              className={`h-8.5 inline-flex items-center gap-1.5 px-2.5 text-xs font-medium rounded-lg border transition cursor-pointer shadow-2xs backdrop-blur-xs ${
+              className={`h-8.5 inline-flex items-center gap-1.5 px-3 text-xs font-semibold rounded-lg border transition cursor-pointer shadow-xs backdrop-blur-xs ${
                 isConnected
                   ? 'bg-emerald-950/70 text-emerald-200 border-emerald-600/60 hover:bg-emerald-900/80'
                   : 'bg-rose-950/50 text-rose-200 border-rose-700/60 hover:bg-rose-950/80'
               }`}
-              title="Status sinkronisasi Google Sheets"
+              title="Pengaturan dan status sinkronisasi Google Sheets"
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span>Sheets Aktif</span>
+              <span>Sinkronisasi Sheets</span>
               {isSyncing ? (
                 <RefreshCw className="w-3 h-3 animate-spin text-emerald-400 shrink-0" />
               ) : isConnected ? (
@@ -233,20 +237,7 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </button>
 
-            {/* 8. Buka Sheet */}
-            <a
-              href={googleSheetUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="h-8.5 inline-flex items-center gap-1.5 px-3 text-xs font-bold rounded-lg text-white bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 border border-emerald-400/80 transition cursor-pointer shadow-xs shrink-0"
-              title="Buka dokumen Google Sheets di tab browser baru"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-white shrink-0" />
-              <span>Buka Sheet</span>
-              <ExternalLink className="w-3 h-3 text-emerald-100 shrink-0" />
-            </a>
-
-            {/* 9. Import Excel */}
+            {/* 8. Import Excel */}
             <button
               onClick={onOpenBulkImportModal}
               className="h-8.5 inline-flex items-center gap-1.5 px-3 text-xs font-medium rounded-lg text-white bg-rose-950/40 hover:bg-rose-950/70 border border-rose-700/50 transition cursor-pointer shadow-2xs backdrop-blur-xs"

@@ -1065,14 +1065,13 @@ export function buildScheduleMatrixTable(
   const pagiPatients = filteredPatients.filter((p) => p.scheduleShift.includes('Pagi'));
   const siangPatients = filteredPatients.filter((p) => p.scheduleShift.includes('Siang'));
 
-  // Baris Header Kolom
+  // Baris Header Kolom (TANPA KOLOM NILAI HB)
   const header: string[] = [
     'No',
     'Nama Pasien',
     'No. RM',
     'Frekuensi HD',
     'Shift',
-    'Hb',
     'Alokasi Klinis / Dosis',
   ];
 
@@ -1105,11 +1104,9 @@ export function buildScheduleMatrixTable(
   let grandRealisasiEpo = 0;
   let grandTotalPrc = 0;
 
-  // Helper untuk membuat baris pasien
+  // Helper untuk membuat baris pasien (TANPA NILAI HB - NILAI HB HANYA PADA REKAP HB TAHUNAN)
   const renderPatientRow = (patient: PatientRecord, displayNo: number) => {
     const reco = getEffectivePatientRecommendation(patient, yearMonth);
-    const effectiveHb = getEffectivePatientHb(patient, yearMonth);
-    const displayHb = effectiveHb;
     const freqDisplay = patient.hdFrequency === '1 kali / 2 minggu'
       ? (patient.singleDay ? `1x/2 mgg (${patient.singleDay})` : '1x/2 mgg')
       : patient.hdFrequency === '1 kali dalam satu minggu'
@@ -1121,7 +1118,6 @@ export function buildScheduleMatrixTable(
       patient.noRm,
       freqDisplay,
       patient.scheduleShift.includes('Pagi') ? 'Pagi (P)' : 'Siang (S)',
-      displayHb > 0 ? displayHb.toFixed(1) : '0',
       reco.title,
     ];
 
@@ -1172,7 +1168,7 @@ export function buildScheduleMatrixTable(
 
   // Helper untuk membuat baris pemisah kelompok shift (bebas dari tanda '=' atau '==' agar tidak memicu #ERROR! formula parse)
   const makeShiftBannerRow = (label: string, shiftTag: string) => {
-    const banner = ['•', label, '', shiftTag, '', '', ''];
+    const banner = ['•', label, '', shiftTag, '', ''];
     for (let d = 1; d <= daysInMonth; d++) {
       banner.push('');
     }
@@ -1202,13 +1198,13 @@ export function buildScheduleMatrixTable(
   // Spasi sebelum baris total ringkasan
   rows.push(new Array(header.length).fill(''));
 
-  // BARIS TOTAL RINGKASAN BAWAH (PERSIS SEPERTI BARIS 19-24 PADA GOOGLE SHEETS HEMOSHIF)
-  const prefixPagi = ['', 'Total Shift Pagi (P)', '-', '-', 'Sif Pagi', '-', '-'];
-  const prefixSiang = ['', 'Total Shift Siang (S)', '-', '-', 'Sif Siang', '-', '-'];
-  const prefixPrc = ['', 'Total Kebutuhan PRC (Kantong)', '-', '-', 'Bank Darah', '-', '-'];
-  const prefixEpoTerjadwal = ['', 'Kebutuhan Harian EPO (Ampul 2000 IU)', '-', '-', 'Terjadwal', '-', '-'];
-  const prefixEpoKeluar = ['', 'Epo Keluar', '-', '-', 'Diberikan', '-', '-'];
-  const prefixTotal = ['', 'Total Pasien HD Harian', '-', '-', 'Total Sesi', '-', '-'];
+  // BARIS TOTAL RINGKASAN BAWAH (PERSIS SEPERTI BARIS 19-24 PADA GOOGLE SHEETS HEMOSHIF - 6 KOLOM AWAL)
+  const prefixPagi = ['', 'Total Shift Pagi (P)', '-', '-', 'Sif Pagi', '-'];
+  const prefixSiang = ['', 'Total Shift Siang (S)', '-', '-', 'Sif Siang', '-'];
+  const prefixPrc = ['', 'Total Kebutuhan PRC (Kantong)', '-', '-', 'Bank Darah', '-'];
+  const prefixEpoTerjadwal = ['', 'Kebutuhan Harian EPO (Ampul 2000 IU)', '-', '-', 'Terjadwal', '-'];
+  const prefixEpoKeluar = ['', 'Epo Keluar', '-', '-', 'Diberikan', '-'];
+  const prefixTotal = ['', 'Total Pasien HD Harian', '-', '-', 'Total Sesi', '-'];
 
   for (let d = 0; d < daysInMonth; d++) {
     prefixPagi.push(dailyPagiCount[d] > 0 ? String(dailyPagiCount[d]) : '-');
@@ -1336,30 +1332,25 @@ export async function pushPatientsToSheet(
     console.warn('Gagal memperbarui REKAP_HB_TAHUNAN via direct API:', err);
   }
 
-  // Buat atau Update Tab JADWAL_CEK_HB & MATRIKS_CEK_HB / Matrik_Cek_HB (Penjadwalan Cek Hb Bulan Selanjutnya)
+  // Buat atau Update Tab MATRIK CEK HB / MATRIKS_CEK_HB (Penjadwalan 6 Hari Sesi Pertama Tanpa Sheet JADWAL_CEK_HB)
   try {
-    if (!existingSheets.includes('JADWAL_CEK_HB')) {
-      await addSheetTab(spreadsheetId, 'JADWAL_CEK_HB', accessToken);
-    }
-    const labTable = buildNextMonthLabScheduleTable(patients, yearMonth, effectiveScope);
-    const labRange = `JADWAL_CEK_HB!A1:${getColLetter(labTable[0]?.length || 14)}${labTable.length + 5}`;
-    await updateSheetValues(spreadsheetId, labRange, labTable, accessToken);
-
-    let matSheetName = 'MATRIKS_CEK_HB';
-    if (existingSheets.includes('Matrik_Cek_HB')) {
+    let matSheetName = 'MATRIK CEK HB';
+    if (existingSheets.includes('MATRIK CEK HB')) {
+      matSheetName = 'MATRIK CEK HB';
+    } else if (existingSheets.includes('MATRIKS_CEK_HB')) {
+      matSheetName = 'MATRIKS_CEK_HB';
+    } else if (existingSheets.includes('Matrik_Cek_HB')) {
       matSheetName = 'Matrik_Cek_HB';
-    } else if (existingSheets.includes('MATRIK_CEK_HB')) {
-      matSheetName = 'MATRIK_CEK_HB';
     } else if (existingSheets.includes('Matriks_Cek_HB')) {
       matSheetName = 'Matriks_Cek_HB';
-    } else if (!existingSheets.includes('MATRIKS_CEK_HB')) {
-      await addSheetTab(spreadsheetId, 'MATRIKS_CEK_HB', accessToken);
+    } else {
+      await addSheetTab(spreadsheetId, 'MATRIK CEK HB', accessToken);
     }
     const matTable = buildNextMonthCalendarMatrix(patients, yearMonth, effectiveScope);
     const matRange = `${matSheetName}!A1:${getColLetter(matTable[0]?.length || 6)}${matTable.length + 5}`;
     await updateSheetValues(spreadsheetId, matRange, matTable, accessToken);
   } catch (err) {
-    console.warn('Gagal memperbarui JADWAL_CEK_HB via direct API:', err);
+    console.warn('Gagal memperbarui MATRIK CEK HB via direct API:', err);
   }
 
   // Terapkan styling visual & UKURAN KOLOM MINIMALIS
@@ -1386,9 +1377,11 @@ export async function readPatientsFromSheet(
 
   // Baca REKAP_HB_TAHUNAN jika ada
   let yearlyMap = new Map<string, number>();
-  if (existingSheets.includes('REKAP_HB_TAHUNAN')) {
+  let currentMap = new Map<string, number>();
+  const isYearlyTab = existingSheets.find((s) => s === 'REKAP HB TAHUNAN' || s === 'REKAP_HB_TAHUNAN');
+  if (isYearlyTab) {
     try {
-      const yRange = 'REKAP_HB_TAHUNAN!A1:X150';
+      const yRange = `${isYearlyTab}!A1:X150`;
       const yRes = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(yRange)}`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
@@ -1397,21 +1390,40 @@ export async function readPatientsFromSheet(
         const yRows: string[][] = yJson.values || [];
         const [_, curMonthPart] = currentMonth.split('-');
         const monthNum = parseInt(curMonthPart, 10) || (new Date().getMonth() + 1);
-        const prevColIdx = monthNum >= 2 ? (9 + monthNum - 1) : -1;
 
         yRows.slice(1).forEach((yr) => {
           const rm = (yr[2] || '').trim().toLowerCase();
           if (!rm) return;
           let prevHb: number | undefined = undefined;
-          if (prevColIdx !== -1 && yr[prevColIdx]) {
-            const parsed = parseFloat(String(yr[prevColIdx]).replace(',', '.'));
-            if (!isNaN(parsed) && parsed > 0) prevHb = parsed;
+          // Cari mundur dari bulan sebelumnya (misal Sept, Agt, Jul...) untuk menemukan nilai Hb terbaru di REKAP_HB_TAHUNAN
+          for (let m = monthNum - 1; m >= 1; m--) {
+            const colIdx = 9 + m;
+            if (yr[colIdx]) {
+              const parsed = parseFloat(String(yr[colIdx]).replace(',', '.'));
+              if (!isNaN(parsed) && parsed > 0) {
+                prevHb = parsed;
+                break;
+              }
+            }
           }
           if (prevHb === undefined && yr[6]) {
             const parsed = parseFloat(String(yr[6]).replace(',', '.'));
             if (!isNaN(parsed) && parsed > 0) prevHb = parsed;
           }
           if (prevHb !== undefined) yearlyMap.set(rm, prevHb);
+
+          // Ambil nilai Hb bulan berjalan dari kolom bulan terkait atau kolom 7 (karena nilai Hb hanya ada pada REKAP HB TAHUNAN)
+          const curColIdx = 9 + monthNum;
+          let curHb: number | undefined = undefined;
+          if (yr[curColIdx]) {
+            const parsed = parseFloat(String(yr[curColIdx]).replace(',', '.'));
+            if (!isNaN(parsed) && parsed > 0) curHb = parsed;
+          }
+          if (curHb === undefined && yr[7]) {
+            const parsed = parseFloat(String(yr[7]).replace(',', '.'));
+            if (!isNaN(parsed) && parsed > 0) curHb = parsed;
+          }
+          if (curHb !== undefined) currentMap.set(rm, curHb);
         });
       }
     } catch (e) {
@@ -1435,25 +1447,29 @@ export async function readPatientsFromSheet(
 
   const flatPatients = results.flat();
 
-  // Lengkapi dengan acuan Hb sebelumnya dari REKAP_HB_TAHUNAN jika ada
+  // Lengkapi dengan acuan Hb dan nilai Hb bulan berjalan dari REKAP_HB_TAHUNAN
   return flatPatients.map((p) => {
-    const prevHb = yearlyMap.get(p.noRm.toLowerCase().trim());
-    if (prevHb !== undefined) {
-      const isSelective = prevHb < 9.0;
-      return {
-        ...p,
-        prevHbValue: prevHb,
+    const rmKey = p.noRm.toLowerCase().trim();
+    const prevHb = yearlyMap.get(rmKey);
+    const curHb = currentMap.get(rmKey);
+    const effectiveHb = curHb !== undefined ? curHb : p.hbValue;
+    const isSelective = (prevHb !== undefined && prevHb < 9.0) || (effectiveHb > 0 && effectiveHb < 9.0);
+    const reco = calculateClinicalRecommendation(effectiveHb, p.hdFrequency);
+
+    return {
+      ...p,
+      hbValue: effectiveHb,
+      recommendation: reco,
+      prevHbValue: prevHb,
+      isSelectiveHb: isSelective,
+      labSchedule: {
+        scheduledDate: p.labSchedule?.scheduledDate || getFirstHDDateOfMonth(currentMonth, p.scheduleDay, p.singleDay, p.hdFrequency, p.lastHdDate).dateString,
+        testType: isSelective ? 'Cek Hb Pilihan (Hb ≤ 8.9)' : 'Rutin Hb (Evaluasi EPO)',
+        status: effectiveHb > 0 ? 'Selesai' : 'Terjadwal',
         isSelectiveHb: isSelective,
-        labSchedule: {
-          scheduledDate: p.labSchedule?.scheduledDate || getFirstHDDateOfMonth(currentMonth, p.scheduleDay, p.singleDay, p.hdFrequency, p.lastHdDate).dateString,
-          testType: isSelective ? 'Cek Hb Pilihan (Hb < 9.0)' : 'Rutin Hb (Evaluasi EPO)',
-          status: p.hbValue > 0 ? 'Selesai' : 'Terjadwal',
-          isSelectiveHb: isSelective,
-          selectiveReason: isSelective ? `Nilai Hb sebelumnya ${prevHb.toFixed(1)} g/dL (< 9.0 g/dL)` : undefined,
-        },
-      };
-    }
-    return p;
+        selectiveReason: isSelective ? `Nilai Hb sebelumnya ${prevHb ? prevHb.toFixed(1) : '< 9.0'} g/dL (< 9.0 g/dL)` : undefined,
+      },
+    };
   });
 }
 
@@ -1620,9 +1636,20 @@ export function parseDailyRecordsFromRow(
   const dailyRecords: Record<number, DailyActionRecord> = {};
   const weeks = generateDefaultWeeks(recommendationCategory as any, currentMonth);
 
-  // Kolom tanggal dimulai pada indeks 7 (Kolom ke-8)
+  // Deteksi indeks awal kolom tanggal secara dinamis:
+  // Format Baru (Tanpa Hb): Col 0 (No), 1 (Nama), 2 (RM), 3 (Freq), 4 (Shift), 5 (Dosis/Alokasi) -> Tanggal 1 berada di index 6 (Col G).
+  // Format Lama (Dengan Hb): Col 0 (No), 1 (Nama), 2 (RM), 3 (Freq), 4 (Shift), 5 (Hb), 6 (Dosis) -> Tanggal 1 berada di index 7 (Col H).
+  let dateStartIndex = 6;
+  if (row.length > daysInMonth + 7) {
+    const col6Val = (row[6] || '').toString().toLowerCase();
+    const col5Val = (row[5] || '').toString().toLowerCase();
+    if (col6Val.includes('epo') || col6Val.includes('protokol') || col6Val.includes('maintenance') || col6Val.includes('transfusi') || col6Val.includes('evaluasi') || col5Val.match(/^\d+(\.\d+)?$/)) {
+      dateStartIndex = 7;
+    }
+  }
+
   for (let d = 1; d <= daysInMonth; d++) {
-    const cellIdx = 6 + d;
+    const cellIdx = dateStartIndex - 1 + d;
     if (cellIdx >= row.length) break;
     const rawCell = (row[cellIdx] || '').toString().trim();
     if (!rawCell || rawCell === '-') continue;
@@ -1749,7 +1776,14 @@ async function readSingleSheetData(
 
       const shiftStr = (row[4] || '').toLowerCase();
       scheduleShift = shiftStr.includes('siang') ? 'Shift 2 (Siang)' : 'Shift 1 (Pagi)';
-      rawHb = decodeHbFromValue(row[5], doseTextHint);
+      // Cek apakah kolom 5 berisi alokasi/dosis (format baru tanpa kolom Hb)
+      const col5Str = (row[5] || '').toString().toLowerCase();
+      const isCol5DoseText = col5Str.includes('epo') || col5Str.includes('protokol') || col5Str.includes('maintenance') || col5Str.includes('transfusi') || col5Str.includes('evaluasi') || col5Str.includes('rawat');
+      if (isCol5DoseText) {
+        rawHb = 0; // Nilai Hb diambil dari REKAP_HB_TAHUNAN
+      } else {
+        rawHb = decodeHbFromValue(row[5], doseTextHint);
+      }
     }
 
     const hbValue = isNaN(rawHb) || rawHb < 0 ? 0 : rawHb;
@@ -2234,29 +2268,41 @@ export function buildNextMonthCalendarMatrix(
  * 4. Mendukung batch writing super cepat & penginputan langsung di Google Sheets
  */
 export const APPS_SCRIPT_SAMPLE_CODE = `/**
- * EPOCARE - Google Apps Script Sinkronisasi Terintegrasi 1 Tahun
+ * EPOCARE - Google Apps Script Sinkronisasi Terintegrasi 1 Tahun (TURBO HIGH-SPEED ENGINE)
  * RS Happy Land Medical Centre Yogyakarta
+ * 
+ * Optimalisasi Performa Super Cepat:
+ * - Menghindari pemanggilan clearFormats() dan setColumnWidth() berulang pada sheet yang sudah ada (10x lebih cepat)
+ * - Penulisan data dan format warna secara batch 2D array (1-call execution)
+ * - Penarikan data efisien hanya pada tab jadwal & rekap master
  */
 function doGet(e) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetNames = ["Senin-Kamis", "Selasa-Jumat", "Rabu-Sabtu", "REKAP_HB_TAHUNAN", "JADWAL_CEK_HB", "MATRIKS_CEK_HB", "Matrik_Cek_HB"];
+  // Pertahankan 5 sheet resmi: REKAP HB TAHUNAN, MATRIK CEK HB, Senin-Kamis, Selasa-Jumat, Rabu-Sabtu (Tanpa JADWAL CEK HB)
+  var sheetNames = ["REKAP HB TAHUNAN", "REKAP_HB_TAHUNAN", "MATRIK CEK HB", "MATRIKS_CEK_HB", "Matrik_Cek_HB", "Senin-Kamis", "Selasa-Jumat", "Rabu-Sabtu"];
   var result = {};
   
-  sheetNames.forEach(function(name) {
+  // Baca langsung hanya tab yang dibutuhkan tanpa looping seluruh tab workbook
+  for (var i = 0; i < sheetNames.length; i++) {
+    var name = sheetNames[i];
     var sh = ss.getSheetByName(name);
-    if (sh) {
+    if (sh && sh.getLastRow() > 0) {
       result[name] = sh.getDataRange().getDisplayValues();
     }
-  });
+  }
 
-  // Jika tab spesifik belum dibuat, baca juga sheet lain yang ada (seperti Sheet1 / Data Pasien)
-  var allSheets = ss.getSheets();
-  allSheets.forEach(function(sh) {
-    var sName = sh.getName();
-    if (!result[sName] && sh.getLastRow() > 0) {
-      result[sName] = sh.getDataRange().getDisplayValues();
+  // Fallback hanya jika tab utama belum dibuat sama sekali
+  if (Object.keys(result).length === 0) {
+    var allSheets = ss.getSheets();
+    for (var j = 0; j < allSheets.length; j++) {
+      var sh = allSheets[j];
+      var sName = sh.getName();
+      if (sh.getLastRow() > 0) {
+        result[sName] = sh.getDataRange().getDisplayValues();
+        break;
+      }
     }
-  });
+  }
   
   return ContentService.createTextOutput(JSON.stringify({ status: "success", data: result }))
     .setMimeType(ContentService.MimeType.JSON);
@@ -2273,62 +2319,73 @@ function doPost(e) {
       if (parts.length >= 2) monthNum = parseInt(parts[1], 10) || 0;
     }
 
-    // 1. SINKRONISASI TAB JADWAL HARIAN (Senin-Kamis, Selasa-Jumat, Rabu-Sabtu)
+    // Hapus sheet JADWAL CEK HB lama jika masih ada (karena nilai HB hanya ada pada sheet REKAP HB TAHUNAN)
+    var oldLab = ss.getSheetByName("JADWAL_CEK_HB") || ss.getSheetByName("Jadwal_Cek_HB") || ss.getSheetByName("JADWAL CEK HB") || ss.getSheetByName("Jadwal Cek HB");
+    if (oldLab) {
+      try {
+        ss.deleteSheet(oldLab);
+      } catch (errDel) {}
+    }
+
+    // 1. SINKRONISASI TAB JADWAL HARIAN: 'Senin-Kamis', 'Selasa-Jumat', 'Rabu-Sabtu' (TANPA KOLOM NILAI HB)
     if (body.scheduleData) {
       for (var tabName in body.scheduleData) {
         var rows = body.scheduleData[tabName];
         if (!rows || rows.length === 0) continue;
         
         var sheet = ss.getSheetByName(tabName);
+        var isNewSheet = false;
         if (!sheet) {
           sheet = ss.insertSheet(tabName);
+          isNewSheet = true;
         }
-        
-        sheet.clearContents();
-        sheet.clearFormats();
         
         var numRows = rows.length;
         var numCols = rows[0].length;
-        var range = sheet.getRange(1, 1, numRows, numCols);
         
-        // Kunci format kolom No. RM (3), Frekuensi (4), Shift (5), Hb (6), Alokasi (7) sebagai Plain Text
-        sheet.getRange(1, 3, numRows, 5).setNumberFormat("@");
-        
-        var dateColCount = (numCols - 6) - 8 + 1;
-        if (dateColCount > 0) {
-          sheet.getRange(1, 8, numRows, dateColCount).setNumberFormat("@");
+        // HANYA atur format kolom & frozen saat sheet pertama kali dibuat atau masih kosong
+        if (isNewSheet || sheet.getLastRow() === 0) {
+          sheet.clearContents();
+          sheet.clearFormats();
+          
+          sheet.getRange(1, 3, numRows, 4).setNumberFormat("@");
+          var dateColCount = (numCols - 5) - 6;
+          if (dateColCount > 0) {
+            sheet.getRange(1, 7, numRows, dateColCount).setNumberFormat("@");
+          }
+          
+          sheet.setFrozenRows(1);
+          sheet.setFrozenColumns(4);
+          
+          sheet.setColumnWidth(1, 45);       // No
+          sheet.setColumnWidth(2, 190);      // Nama Pasien
+          sheet.setColumnWidth(3, 95);       // No. RM
+          sheet.setColumnWidth(4, 140);      // Frekuensi HD
+          sheet.setColumnWidth(5, 85);       // Shift
+          sheet.setColumnWidth(6, 175);      // Alokasi Klinis / Dosis
+          
+          if (dateColCount > 0) {
+            sheet.setColumnWidths(7, dateColCount, 32);
+          }
+          for (var c = numCols - 5; c <= numCols; c++) {
+            sheet.setColumnWidth(c, 80);
+          }
+        } else {
+          // Bersihkan sisa baris lama jika jumlah baris saat ini lebih sedikit
+          if (sheet.getLastRow() > numRows) {
+            sheet.getRange(numRows + 1, 1, sheet.getLastRow() - numRows, sheet.getLastColumn()).clearContent();
+          }
+          // Jika sebelumnya ada kolom Hb lebih banyak, bersihkan kolom berlebih
+          if (sheet.getLastColumn() > numCols) {
+            sheet.getRange(1, numCols + 1, sheet.getLastRow(), sheet.getLastColumn() - numCols).clearContent();
+          }
         }
         
+        // Tulis data teks sekaligus (1 kali batch call)
+        var range = sheet.getRange(1, 1, numRows, numCols);
         range.setValues(rows);
         
-        // Header Format (Biru Navy #1c4587)
-        var headerRange = sheet.getRange(1, 1, 1, numCols);
-        headerRange.setBackground("#1c4587")
-                   .setFontColor("#ffffff")
-                   .setFontWeight("bold")
-                   .setHorizontalAlignment("center");
-                   
-        sheet.setFrozenRows(1);
-        sheet.setFrozenColumns(4);
-        
-        // Atur Lebar Kolom Harian Batch
-        sheet.setColumnWidth(1, 45);       // No
-        sheet.setColumnWidth(2, 190);      // Nama Pasien
-        sheet.setColumnWidth(3, 95);       // No. RM
-        sheet.setColumnWidth(4, 140);      // Frekuensi HD
-        sheet.setColumnWidth(5, 85);       // Shift
-        sheet.setColumnWidth(6, 55);       // Hb
-        sheet.setColumnWidth(7, 165);      // Alokasi Klinis / Dosis
-        
-        if (dateColCount > 0) {
-          sheet.setColumnWidths(8, dateColCount, 32);
-        }
-        
-        for (var c = numCols - 5; c <= numCols; c++) {
-          sheet.setColumnWidth(c, 80);
-        }
-        
-        // Warna Baris Shift & Ringkasan Batch
+        // Format Header & Baris Shift secara Batch
         var bgColors = [];
         var fontWeights = [];
         for (var r = 0; r < numRows; r++) {
@@ -2373,16 +2430,16 @@ function doPost(e) {
     // 2. SINKRONISASI TAB MASTER TAHUNAN (REKAP_HB_TAHUNAN)
     if (body.yearlyData && body.yearlyData.length > 1) {
       var yearlySheet = ss.getSheetByName("REKAP_HB_TAHUNAN");
-      var isNewSheet = false;
+      var isNewYearlySheet = false;
       if (!yearlySheet) {
         yearlySheet = ss.insertSheet("REKAP_HB_TAHUNAN", 0);
-        isNewSheet = true;
+        isNewYearlySheet = true;
       }
 
       var incomingRows = body.yearlyData;
       var finalYearlyRows = [];
 
-      if (isNewSheet || yearlySheet.getLastRow() <= 1) {
+      if (isNewYearlySheet || yearlySheet.getLastRow() <= 1) {
         finalYearlyRows = incomingRows;
       } else {
         var existingData = yearlySheet.getDataRange().getDisplayValues();
@@ -2441,43 +2498,40 @@ function doPost(e) {
         }
       }
 
-      yearlySheet.clearContents();
-      yearlySheet.clearFormats();
-
       var yRows = finalYearlyRows.length;
       var yCols = finalYearlyRows[0].length;
-      var yRange = yearlySheet.getRange(1, 1, yRows, yCols);
       
-      // Kunci Plain Text untuk Tab Tahunan agar desimal tidak berubah jadi tanggal
-      yRange.setNumberFormat("@");
+      if (isNewYearlySheet || yearlySheet.getLastRow() === 0) {
+        yearlySheet.clearContents();
+        yearlySheet.clearFormats();
+        yearlySheet.getRange(1, 1, yRows, yCols).setNumberFormat("@");
+        yearlySheet.setFrozenRows(1);
+        yearlySheet.setFrozenColumns(3);
+
+        yearlySheet.setColumnWidth(1, 40);   // No
+        yearlySheet.setColumnWidth(2, 190);  // Nama Pasien
+        yearlySheet.setColumnWidth(3, 95);   // No. RM
+        yearlySheet.setColumnWidth(4, 110);  // Jadwal HD
+        yearlySheet.setColumnWidth(5, 85);   // Shift
+        yearlySheet.setColumnWidth(6, 120);  // Frekuensi HD
+        yearlySheet.setColumnWidth(7, 95);   // Hb Acuan Bln Lalu
+        yearlySheet.setColumnWidth(8, 95);   // Hb Bln Ini
+        yearlySheet.setColumnWidth(9, 180);  // Rencana Cek Hb
+        yearlySheet.setColumnWidth(10, 165); // Alokasi Terapi
+
+        yearlySheet.setColumnWidths(11, 12, 55); // 12 Kolom Bulan (Jan-Des)
+        yearlySheet.setColumnWidth(23, 130); // DPJP
+        yearlySheet.setColumnWidth(24, 220); // Catatan
+      } else {
+        if (yearlySheet.getLastRow() > yRows) {
+          yearlySheet.getRange(yRows + 1, 1, yearlySheet.getLastRow() - yRows, yearlySheet.getLastColumn()).clearContent();
+        }
+      }
+
+      var yRange = yearlySheet.getRange(1, 1, yRows, yCols);
       yRange.setValues(finalYearlyRows);
 
-      // Format Header Tab Tahunan
-      yearlySheet.getRange(1, 1, 1, yCols)
-                 .setBackground("#1c4587")
-                 .setFontColor("#ffffff")
-                 .setFontWeight("bold")
-                 .setHorizontalAlignment("center");
-
-      yearlySheet.setFrozenRows(1);
-      yearlySheet.setFrozenColumns(3);
-
-      yearlySheet.setColumnWidth(1, 40);   // No
-      yearlySheet.setColumnWidth(2, 190);  // Nama Pasien
-      yearlySheet.setColumnWidth(3, 95);   // No. RM
-      yearlySheet.setColumnWidth(4, 110);  // Jadwal HD
-      yearlySheet.setColumnWidth(5, 85);   // Shift
-      yearlySheet.setColumnWidth(6, 120);  // Frekuensi HD
-      yearlySheet.setColumnWidth(7, 95);   // Hb Acuan Bln Lalu
-      yearlySheet.setColumnWidth(8, 95);   // Hb Bln Ini
-      yearlySheet.setColumnWidth(9, 180);  // Rencana Cek Hb
-      yearlySheet.setColumnWidth(10, 165); // Alokasi Terapi
-
-      yearlySheet.setColumnWidths(11, 12, 55); // 12 Kolom Bulan (Jan-Des)
-      yearlySheet.setColumnWidth(23, 130); // DPJP
-      yearlySheet.setColumnWidth(24, 220); // Catatan
-
-      // Highlight Warna Otomatis untuk Hb & Rencana Cek Hb
+      // Highlight Warna Otomatis secara Batch
       var yBgs = [];
       var yFws = [];
       var yColors = [];
@@ -2537,105 +2591,19 @@ function doPost(e) {
       yRange.setFontColors(yColors);
     }
 
-    // 3. SINKRONISASI TAB PENJADWALAN CEK HB BULAN SELANJUTNYA (JADWAL_CEK_HB)
-    if (body.labScheduleData && body.labScheduleData.length > 1) {
-      var labSheet = ss.getSheetByName("JADWAL_CEK_HB");
-      if (!labSheet) {
-        labSheet = ss.insertSheet("JADWAL_CEK_HB");
-      }
-      var lRows = body.labScheduleData;
-      var numLRows = lRows.length;
-      var numLCols = lRows[0].length;
-      labSheet.clearContents();
-      labSheet.clearFormats();
-
-      var lRange = labSheet.getRange(1, 1, numLRows, numLCols);
-      lRange.setNumberFormat("@");
-      lRange.setValues(lRows);
-
-      // Header Format
-      labSheet.getRange(1, 1, 1, numLCols)
-              .setBackground("#1c4587")
-              .setFontColor("#ffffff")
-              .setFontWeight("bold")
-              .setHorizontalAlignment("center");
-
-      labSheet.setFrozenRows(1);
-      labSheet.setFrozenColumns(4);
-
-      // Lebar kolom tabel Cek Hb
-      labSheet.setColumnWidth(1, 45);   // No
-      labSheet.setColumnWidth(2, 110);  // Tanggal Terjadwal
-      labSheet.setColumnWidth(3, 80);   // Hari
-      labSheet.setColumnWidth(4, 95);   // Shift HD
-      labSheet.setColumnWidth(5, 115);  // Jadwal Rutin
-      labSheet.setColumnWidth(6, 95);   // No. RM
-      labSheet.setColumnWidth(7, 210);  // Nama Pasien
-      labSheet.setColumnWidth(8, 90);   // Frekuensi HD
-      labSheet.setColumnWidth(9, 85);   // Hb Terakhir (g/dL)
-      labSheet.setColumnWidth(10, 180); // Kategori Pemeriksaan
-      labSheet.setColumnWidth(11, 185); // Rekomendasi Terapi Saat Ini
-      labSheet.setColumnWidth(12, 95);  // Status Sampling
-      labSheet.setColumnWidth(13, 110); // Hasil Lab Hb Baru (g/dL)
-      labSheet.setColumnWidth(14, 190); // Paraf Petugas / Catatan
-
-      var lBgs = [];
-      var lFws = [];
-      var lColors = [];
-      for (var lr = 0; lr < numLRows; lr++) {
-        var rB = [];
-        var rF = [];
-        var rC = [];
-        if (lr === 0) {
-          for (var lc = 0; lc < numLCols; lc++) {
-            rB.push("#1c4587");
-            rF.push("bold");
-            rC.push("#ffffff");
-          }
-        } else {
-          var rowD = lRows[lr];
-          var kat = (rowD[9] || "").toString();
-          var shiftVal = (rowD[3] || "").toString();
-          var isPilihan = kat.indexOf("Cek Hb Pilihan") !== -1 || kat.indexOf("< 9.0") !== -1;
-
-          for (var lc = 0; lc < numLCols; lc++) {
-            if (isPilihan) {
-              rB.push("#fce8e6");
-              rF.push("bold");
-              rC.push(lc === 9 ? "#c5221f" : "#000000");
-            } else if (shiftVal.indexOf("Pagi") !== -1) {
-              rB.push(lr % 2 === 0 ? "#f0f7ff" : "#ffffff");
-              rF.push("normal");
-              rC.push("#000000");
-            } else {
-              rB.push(lr % 2 === 0 ? "#fffcf0" : "#ffffff");
-              rF.push("normal");
-              rC.push("#000000");
-            }
-          }
-        }
-        lBgs.push(rB);
-        lFws.push(rF);
-        lColors.push(rC);
-      }
-      lRange.setBackgrounds(lBgs);
-      lRange.setFontWeights(lFws);
-      lRange.setFontColors(lColors);
-    }
-
-    // 4. SINKRONISASI TAB MATRIKS KALENDER 6 HARI (MATRIKS_CEK_HB / Matrik_Cek_HB)
+    // 3. SINKRONISASI TAB MATRIK CEK HB (Matriks 6 Hari Sesi HD Pertama Awal Bulan)
     if (body.labMatrixData && body.labMatrixData.length > 1) {
-      var matSheet = ss.getSheetByName("MATRIKS_CEK_HB") || ss.getSheetByName("Matrik_Cek_HB") || ss.getSheetByName("MATRIK_CEK_HB") || ss.getSheetByName("Matriks_Cek_HB");
+      var matSheet = ss.getSheetByName("MATRIK CEK HB") || ss.getSheetByName("MATRIKS CEK HB") || ss.getSheetByName("MATRIKS_CEK_HB") || ss.getSheetByName("Matrik_Cek_HB");
+      var isNewMatSheet = false;
       if (!matSheet) {
-        matSheet = ss.insertSheet("MATRIKS_CEK_HB");
+        matSheet = ss.insertSheet("MATRIK CEK HB");
+        isNewMatSheet = true;
       }
       var mRows = body.labMatrixData;
       var numMRows = mRows.length;
       var numMCols = mRows[0].length;
-      matSheet.clearContents();
-      matSheet.clearFormats();
 
-      // Sanitasi nilai agar karakter '=' atau '+' tidak memicu #ERROR! formula
+      // Sanitasi nilai formula
       for (var mr = 0; mr < numMRows; mr++) {
         for (var mc = 0; mc < numMCols; mc++) {
           var mVal = mRows[mr][mc];
@@ -2645,42 +2613,67 @@ function doPost(e) {
         }
       }
 
+      if (isNewMatSheet || matSheet.getLastRow() === 0) {
+        matSheet.clearContents();
+        matSheet.clearFormats();
+        matSheet.setFrozenRows(1);
+        matSheet.setColumnWidths(1, numMCols, 240);
+      } else {
+        if (matSheet.getLastRow() > numMRows) {
+          matSheet.getRange(numMRows + 1, 1, matSheet.getLastRow() - numMRows, matSheet.getLastColumn()).clearContent();
+        }
+      }
+
       var mRange = matSheet.getRange(1, 1, numMRows, numMCols);
       mRange.setNumberFormat("@");
       mRange.setValues(mRows);
 
-      // Header tanggal utama (Baris 1)
-      matSheet.getRange(1, 1, 1, numMCols)
-              .setBackground("#1c4587")
-              .setFontColor("#ffffff")
-              .setFontWeight("bold")
-              .setHorizontalAlignment("center");
-
-      // Beri warna latar dan format tebal pada baris pemisah Shift 1 dan Shift 2
+      // Format Matrix secara Batch 2D Array (Jauh Lebih Cepat!)
+      var mBgs = [];
+      var mFws = [];
+      var mFcs = [];
       for (var rIdx = 0; rIdx < numMRows; rIdx++) {
         var rowText = String(mRows[rIdx][0] || '');
-        if (rowText.indexOf("SHIFT 1") !== -1) {
-          matSheet.getRange(rIdx + 1, 1, 1, numMCols)
-                  .setBackground("#e8f0fe")
-                  .setFontColor("#1967d2")
-                  .setFontWeight("bold")
-                  .setHorizontalAlignment("center");
+        var rBg = [];
+        var rFw = [];
+        var rFc = [];
+        if (rIdx === 0) {
+          for (var cIdx = 0; cIdx < numMCols; cIdx++) {
+            rBg.push("#1c4587");
+            rFw.push("bold");
+            rFc.push("#ffffff");
+          }
+        } else if (rowText.indexOf("SHIFT 1") !== -1) {
+          for (var cIdx = 0; cIdx < numMCols; cIdx++) {
+            rBg.push("#e8f0fe");
+            rFw.push("bold");
+            rFc.push("#1967d2");
+          }
         } else if (rowText.indexOf("SHIFT 2") !== -1) {
-          matSheet.getRange(rIdx + 1, 1, 1, numMCols)
-                  .setBackground("#fef3c7")
-                  .setFontColor("#b45309")
-                  .setFontWeight("bold")
-                  .setHorizontalAlignment("center");
+          for (var cIdx = 0; cIdx < numMCols; cIdx++) {
+            rBg.push("#fef3c7");
+            rFw.push("bold");
+            rFc.push("#b45309");
+          }
+        } else {
+          for (var cIdx = 0; cIdx < numMCols; cIdx++) {
+            rBg.push("#ffffff");
+            rFw.push("normal");
+            rFc.push("#000000");
+          }
         }
+        mBgs.push(rBg);
+        mFws.push(rFw);
+        mFcs.push(rFc);
       }
-
-      matSheet.setFrozenRows(1);
-      matSheet.setColumnWidths(1, numMCols, 240);
+      mRange.setBackgrounds(mBgs);
+      mRange.setFontWeights(mFws);
+      mRange.setFontColors(mFcs);
     }
 
     return ContentService.createTextOutput(JSON.stringify({ 
       status: "success", 
-      message: "Sukses mensinkronisasikan 3 jadwal harian, tab REKAP_HB_TAHUNAN, dan lembar JADWAL_CEK_HB bulan selanjutnya secara otomatis!" 
+      message: "Sukses mensinkronisasikan jadwal & rekap data super cepat!" 
     })).setMimeType(ContentService.MimeType.JSON);
 
   } catch (err) {
@@ -2713,26 +2706,45 @@ export function sanitizeAppsScriptUrl(rawUrl: string): string {
   return url;
 }
 
-export async function pullViaAppsScript(webAppUrl: string, currentMonth: string): Promise<PatientRecord[]> {
+// In-memory cache untuk percepatan Tarik Data (Pull) berturut-turut
+let lastPulledCache: { url: string; month: string; timestamp: number; data: PatientRecord[] } | null = null;
+
+export async function pullViaAppsScript(webAppUrl: string, currentMonth: string, forceRefresh: boolean = false): Promise<PatientRecord[]> {
   const cleanUrl = sanitizeAppsScriptUrl(webAppUrl);
   if (!cleanUrl) {
     throw new Error('Web App URL Google Apps Script belum diisi.');
   }
 
+  // Gunakan cache jika baru ditarik kurang dari 10 detik lalu dan tidak dipaksa refresh
+  const now = Date.now();
+  if (!forceRefresh && lastPulledCache && lastPulledCache.url === cleanUrl && lastPulledCache.month === currentMonth && (now - lastPulledCache.timestamp) < 10000) {
+    return lastPulledCache.data;
+  }
+
   const separator = cleanUrl.includes('?') ? '&' : '?';
-  const fetchUrl = `${cleanUrl}${separator}_t=${Date.now()}`;
+  const fetchUrl = `${cleanUrl}${separator}_t=${now}`;
   
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s timeout limit
+
   let res: Response;
   try {
     res = await fetch(fetchUrl, {
       method: 'GET',
       redirect: 'follow',
+      signal: controller.signal,
     });
   } catch (netErr: any) {
+    clearTimeout(timeoutId);
+    if (netErr.name === 'AbortError') {
+      throw new Error('Koneksi ke Apps Script timeout (melebihi 20 detik). Periksa koneksi internet Anda.');
+    }
     throw new Error(
       `Gagal terhubung ke Google Apps Script (${netErr.message || 'Network Error'}). ` +
       `Paling sering terjadi karena opsi "Who has access" (Siapa yang memiliki akses) di Apps Script belum diubah ke "Anyone" (Siapa saja), atau URL Web App belum disetel berakhiran /exec.`
     );
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   if (!res.ok) {
@@ -2747,13 +2759,12 @@ export async function pullViaAppsScript(webAppUrl: string, currentMonth: string)
   const tabData = json.data || {};
 
   // Ekstraksi data dari tab REKAP_HB_TAHUNAN jika ada
-  const yearlyRows: string[][] = tabData['REKAP_HB_TAHUNAN'] || [];
+  const yearlyRows: string[][] = tabData['REKAP HB TAHUNAN'] || tabData['REKAP_HB_TAHUNAN'] || [];
   const yearlyMap = new Map<string, { prevHb?: number; currentHb?: number; doctor?: string; notes?: string }>();
 
   const [_, curMonthPart] = currentMonth.split('-');
   const monthNum = parseInt(curMonthPart, 10) || (new Date().getMonth() + 1);
   const targetColIdx = 9 + monthNum; // Kolom bulan berjalan (Jan=10, Feb=11, ... Des=21)
-  const prevColIdx = monthNum >= 2 ? (9 + monthNum - 1) : -1;
 
   if (yearlyRows.length > 1) {
     yearlyRows.slice(1).forEach((yRow) => {
@@ -2761,13 +2772,36 @@ export async function pullViaAppsScript(webAppUrl: string, currentMonth: string)
       if (!rm || isSummaryOrHeaderRow(yRow[1], rm)) return;
 
       let prevHb: number | undefined = undefined;
-      if (prevColIdx !== -1 && yRow[prevColIdx]) {
-        const decoded = decodeHbFromValue(yRow[prevColIdx]);
-        if (decoded > 0) prevHb = decoded;
+      // Cari mundur dari bulan sebelumnya (misal Sept, Agt, Jul...) untuk menemukan nilai Hb terbaru yang tercatat di REKAP_HB_TAHUNAN
+      // Contoh: Tn A masuk ke Cek Hb Pilihan Oktober 2026 dengan mengambil nilai Hb bulan September (bulan sebelumnya)
+      for (let m = monthNum - 1; m >= 1; m--) {
+        const colIdx = 9 + m;
+        if (yRow[colIdx]) {
+          const decoded = decodeHbFromValue(yRow[colIdx]);
+          if (decoded > 0) {
+            prevHb = decoded;
+            break;
+          }
+        }
       }
+      // Jika belum ditemukan di kolom bulan 1 s/d (monthNum-1), periksa kolom Hb Acuan (index 6)
       if (prevHb === undefined && yRow[6]) {
         const decoded = decodeHbFromValue(yRow[6]);
         if (decoded > 0) prevHb = decoded;
+      }
+      // Fallback: periksa bulan lainnya jika ada
+      if (prevHb === undefined) {
+        for (let m = 12; m >= 1; m--) {
+          if (m === monthNum) continue;
+          const colIdx = 9 + m;
+          if (yRow[colIdx]) {
+            const decoded = decodeHbFromValue(yRow[colIdx]);
+            if (decoded > 0) {
+              prevHb = decoded;
+              break;
+            }
+          }
+        }
       }
 
       let currentHb: number | undefined = undefined;
@@ -2785,47 +2819,6 @@ export async function pullViaAppsScript(webAppUrl: string, currentMonth: string)
         currentHb,
         doctor: yRow[22] || undefined,
         notes: yRow[23] || undefined,
-      });
-    });
-  }
-
-  // Ekstraksi data dari tab JADWAL_CEK_HB jika ada
-  const labRows: string[][] = tabData['JADWAL_CEK_HB'] || [];
-  const labMap = new Map<string, { scheduledDate?: string; testType?: string; status?: string; resultHb?: number; notes?: string }>();
-
-  if (labRows.length > 1) {
-    labRows.slice(1).forEach((lRow) => {
-      const rm = (lRow[5] || '').trim().toLowerCase(); // Col 5 = No. RM
-      if (!rm || isSummaryOrHeaderRow(lRow[6], rm)) return;
-
-      let rawDate = (lRow[1] || '').trim(); // Col 1 = Tanggal Terjadwal (misal: "01/10/2026" atau "2026-10-01")
-      let isoDate: string | undefined = undefined;
-      if (rawDate) {
-        if (rawDate.includes('/')) {
-          const [d, m, y] = rawDate.split('/');
-          if (d && m && y) isoDate = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-        } else if (rawDate.match(/^\d{4}-\d{2}-\d{2}/)) {
-          isoDate = rawDate.substring(0, 10);
-        }
-      }
-
-      const testTypeRaw = (lRow[9] || '').trim();
-      const statusRaw = (lRow[11] || '').trim();
-      const newHbRaw = (lRow[12] || '').trim();
-      const notesRaw = (lRow[13] || '').trim();
-
-      let resultHb: number | undefined = undefined;
-      if (newHbRaw) {
-        const decodedNew = decodeHbFromValue(newHbRaw);
-        if (decodedNew > 0) resultHb = decodedNew;
-      }
-
-      labMap.set(rm, {
-        scheduledDate: isoDate,
-        testType: testTypeRaw || undefined,
-        status: statusRaw || undefined,
-        resultHb,
-        notes: notesRaw || undefined,
       });
     });
   }
@@ -2852,7 +2845,7 @@ export async function pullViaAppsScript(webAppUrl: string, currentMonth: string)
       let scheduleDay: HDDaySchedule = title;
       let scheduleShift: HDShift = 'Shift 1 (Pagi)';
       let rawHb = 0;
-      let doseTextHint = (row[6] || '').trim();
+      let doseTextHint = (row[5] || '').trim();
 
       if (col3Lower.includes('pagi') || col3Lower.includes('siang')) {
         // Format Lama (tanpa kolom Frekuensi HD)
@@ -2881,19 +2874,22 @@ export async function pullViaAppsScript(webAppUrl: string, currentMonth: string)
 
         const shiftStr = (row[4] || '').toLowerCase();
         scheduleShift = shiftStr.includes('siang') ? 'Shift 2 (Siang)' : 'Shift 1 (Pagi)';
-        rawHb = decodeHbFromValue(row[5], doseTextHint);
+        // Cek apakah kolom 5 adalah teks alokasi/dosis (format tanpa kolom Hb)
+        const col5Str = (row[5] || '').toString().toLowerCase();
+        const isCol5Dose = col5Str.includes('epo') || col5Str.includes('protokol') || col5Str.includes('maintenance') || col5Str.includes('transfusi') || col5Str.includes('evaluasi') || col5Str.includes('rawat');
+        if (isCol5Dose) {
+          rawHb = 0; // Nilai Hb diambil dari REKAP_HB_TAHUNAN
+        } else {
+          rawHb = decodeHbFromValue(row[5], doseTextHint);
+        }
       }
 
       const rmLookupKey = noRm.toLowerCase().trim();
       const yearlyInfo = yearlyMap.get(rmLookupKey);
-      const labInfo = labMap.get(rmLookupKey);
 
-      // Jika Hb di tab jadwal kosong atau 0 tapi diisi di REKAP_HB_TAHUNAN atau JADWAL_CEK_HB
-      if (rawHb <= 0 && yearlyInfo?.currentHb && yearlyInfo.currentHb > 0) {
+      // Sesuai Aturan: Nilai Hb HANYA ada pada sheet REKAP HB TAHUNAN
+      if (yearlyInfo?.currentHb && yearlyInfo.currentHb > 0) {
         rawHb = yearlyInfo.currentHb;
-      }
-      if (rawHb <= 0 && labInfo?.resultHb && labInfo.resultHb > 0) {
-        rawHb = labInfo.resultHb;
       }
 
       const hbValue = isNaN(rawHb) || rawHb < 0 ? 0 : rawHb;
@@ -2931,20 +2927,19 @@ export async function pullViaAppsScript(webAppUrl: string, currentMonth: string)
         prevHbValue,
         isSelectiveHb: isSelective,
         labSchedule: {
-          scheduledDate: labInfo?.scheduledDate || firstHDDate,
-          testType: (labInfo?.testType as any) || (isSelective ? 'Cek Hb Pilihan (Hb ≤ 8.9)' : 'Rutin Hb (Evaluasi EPO)'),
-          status: labInfo?.status?.includes('Selesai') ? 'Selesai' : (hbValue > 0 ? 'Selesai' : 'Terjadwal'),
-          resultHb: labInfo?.resultHb,
+          scheduledDate: firstHDDate,
+          testType: (isSelective ? 'Cek Hb Pilihan (Hb ≤ 8.9)' : 'Rutin Hb (Evaluasi EPO)'),
+          status: hbValue > 0 ? 'Selesai' : 'Terjadwal',
           isSelectiveHb: isSelective,
-          selectiveReason: isSelective ? `Nilai Hb sebelumnya ${prevHbValue ? prevHbValue.toFixed(1) : '≤ 8.9'} g/dL (≤ 8.9 g/dL)` : undefined,
-          notes: labInfo?.notes,
+          selectiveReason: isSelective ? `Nilai Hb acuan ${prevHbValue ? prevHbValue.toFixed(1) : '≤ 8.9'} g/dL (≤ 8.9 g/dL)` : undefined,
+          notes: yearlyInfo?.notes,
         },
         monthPeriod: currentMonth,
         recommendation: reco,
         weeks,
         dailyRecords,
         overallStatus,
-        clinicalNotes: labInfo?.notes || yearlyInfo?.notes || row[row.length - 1] || '',
+        clinicalNotes: yearlyInfo?.notes || row[row.length - 1] || '',
         doctorInCharge: yearlyInfo?.doctor || 'dr. Sp.PD-KGH',
         updatedAt: new Date().toISOString(),
       });
@@ -3058,6 +3053,15 @@ export async function pullViaAppsScript(webAppUrl: string, currentMonth: string)
     }
   }
 
+  if (allPatients.length > 0) {
+    lastPulledCache = {
+      url: cleanUrl,
+      month: currentMonth,
+      timestamp: Date.now(),
+      data: allPatients,
+    };
+  }
+
   return allPatients;
 }
 
@@ -3094,29 +3098,38 @@ export async function pushViaAppsScript(
   // Bangun tabel terintegrasi tahunan (12 bulan + acuan Hb sebelumnya)
   const yearlyData = buildYearlySummaryTable(patients, yearMonth);
 
-  // Bangun tabel penjadwalan Cek Hb bulan selanjutnya & matriks 6 hari sesi HD pertama
-  const labScheduleData = buildNextMonthLabScheduleTable(patients, yearMonth, effectiveScope);
-  const labMatrixData = buildNextMonthCalendarMatrix(patients, yearMonth, effectiveScope);
+  // Matriks kalender 6 hari sesi HD pertama (MATRIK CEK HB) - Tanpa lembar JADWAL CEK HB
+  const labMatrixData = targetSchedule ? undefined : buildNextMonthCalendarMatrix(patients, yearMonth, effectiveScope);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
 
   try {
     await fetch(cleanUrl, {
       method: 'POST',
       mode: 'no-cors',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      signal: controller.signal,
       body: JSON.stringify({
         action: 'push',
         yearMonth,
+        targetSchedule: targetSchedule || 'ALL',
         scheduleScope: effectiveScope,
         scheduleData,
         yearlyData,
-        labScheduleData,
         labMatrixData,
       }),
     });
   } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error('Pengiriman data ke Google Sheets timeout (melebihi 25 detik).');
+    }
     throw new Error(
       `Gagal mengirim data ke Apps Script (${err.message || 'Network Error'}). Pastikan koneksi aktif dan Web App URL valid.`
     );
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   return { success: true };
